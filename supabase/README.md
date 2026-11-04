@@ -27,3 +27,7 @@ Preparar y publicar estos archivos no ejecuta SQL dentro de la cuenta de Supabas
 ## Actualizar una base existente: tiempos de preparación
 
 Si ya ejecutaste setup.sql antes de agregar esta sección, ejecuta ahora **preparation-times.sql**, completo, en SQL Editor. Añade la tabla protegida, la función de guardado y la lectura de preparaciones. No requiere volver a importar el inventario ni autorizar de nuevo a los usuarios existentes. La versión actual de setup.sql ya lo incluye para instalaciones nuevas.
+
+## Actualizar: incidencias
+
+Ejecuta **incidents.sql** completo en SQL Editor después de la instalación base. Añade el registro protegido de incidencias y su función de guardado. La numeración empieza en INC-0011 únicamente cuando no existen incidencias; repetir la actualización conserva la numeración, los registros y el resto del inventario. No requiere reautorizar usuarios. Los reportes PDF se generan en el navegador con los datos guardados.

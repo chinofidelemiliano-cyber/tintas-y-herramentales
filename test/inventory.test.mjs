@@ -68,3 +68,14 @@ test('preparation log saves and edits time records without changing stock or mov
  await post('preparations',{...body,start_time:'23:50',end_time:'00:10'},400);await post('preparations',{...body,start_time:'24:00'},400);
  assert.deepEqual(current.lots.map(l=>[l.id,l.grams]),balance);assert.equal(current.movements.length,count);assert.equal((await get()).preparations.length,current.preparations.length);
 });
+test('incidents start at INC-0011, link existing orders and preserve stock',async()=>{
+ const s=await get(),o=s.orders.find(o=>o.folio==='OP-PENDING'&&o.status==='confirmed'),before=s.lots.map(l=>[l.id,l.grams]);
+ const body={date:s.today,order_id:o.id,np:o.lines[0].np,machine:'Comco 2',responsible:'Producción',description:'Selección incorrecta de anilox',action:'',impact:'Paro',status:'Abierta',request_key:'incident-test-one'};
+ const result=await post('incidents',body);assert.equal(result.folio,'INC-0011');const retry=await post('incidents',body);assert.equal(retry.id,result.id);
+ let current=await get();assert.equal(current.incidents.length,1);assert.equal(current.incidents[0].order_ref,'OP-PENDING');
+ const next=await post('incidents',{...body,request_key:'incident-test-two',machine:'Mark Andy'});assert.equal(next.folio,'INC-0012');
+ await post('incidents',{...body,id:result.id,status:'Cerrada'},400);
+ await post('incidents',{...body,id:result.id,status:'Cerrada',action:'Ajuste y verificación'});current=await get();assert.equal(current.incidents.find(i=>i.id===result.id).folio,'INC-0011');assert.equal(current.incidents.find(i=>i.id===result.id).status,'Cerrada');
+ for(const change of [{order_id:999999},{np:'NP-AJENO'},{machine:'Desconocida'},{responsible:'Sin responsable'}])await post('incidents',{...body,request_key:'bad-'+JSON.stringify(change),...change},400);
+ assert.deepEqual((await get()).lots.map(l=>[l.id,l.grams]),before);
+});

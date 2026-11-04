@@ -75,11 +75,15 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   if(summary){const lines=wrap(summary,totalWidth,9);if(y+lines.length*13+15>bottom)newPage();y+=18;for(const l of lines){text(margin,y,l,9,true);y+=13;}}
   }
   pages.push(stream);
+  return assemblePDF(pages,{width:W,height:H,footer:(page,total)=>`${language==='en'?'Inventory':'Inventario'} · ${recordCount} ${language==='en'?'records':'registros'} · ${language==='en'?'Page':'Página'} ${page} ${language==='en'?'of':'de'} ${total}`});
+}
+
+export function assemblePDF(pages,{width:W,height:H,footer}){
   const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
   const kids=[];
   pages.forEach((content,i)=>{
     const pageId=objects.length,contentId=pageId+1;kids.push(`${pageId} 0 R`);
-    content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 ${margin} 21 Tm (${literal(`${language==='en'?'Inventory':'Inventario'} · ${recordCount} ${language==='en'?'records':'registros'} · ${language==='en'?'Page':'Página'} ${i+1} ${language==='en'?'of':'de'} ${pages.length}`)}) Tj ET\n`;
+    if(footer)content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 32 21 Tm (${literal(footer(i+1,pages.length))}) Tj ET\n`;
     objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>`);
     objects.push(`<< /Length ${bytes(content).length} >>\nstream\n${content}endstream`);
   });
@@ -92,3 +96,5 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   output+=`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
   return bytes(output);
 }
+
+export {wrap as wrapPDFText,literal as pdfLiteral};

@@ -36,5 +36,14 @@ await assert.rejects(savePrep({...preparation,start_time:'23:50',end_time:'00:10
 await assert.rejects(db.query('select * from public.prisma_preparations'));
 assert.deepEqual((await state()).lots,beforePrep.lots);assert.equal((await state()).movements.length,beforePrep.movements.length);console.log('PASS preparation times save, edit and preserve inventory');
 await db.exec('reset role');await db.exec(readFileSync(new URL('../supabase/preparation-times.sql',import.meta.url),'utf8'));await db.exec('set role authenticated');assert.equal((await state()).preparations.length,1);console.log('PASS preparation upgrade preserves existing data');
-await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(state());await assert.rejects(savePrep(preparation));console.log('PASS signed-in nonmembers cannot access inventory or preparations');
+const saveIncident=payload=>db.query('select public.prisma_save_incident($1::jsonb) as r',[JSON.stringify(payload)]);
+const beforeIncident=await state();
+const incident={date:s.today,order_id:draft.id,np:'118-1',machine:'Comco 2',responsible:'Producción',description:'Incidencia de prueba',action:'',impact:'Paro',status:'Abierta',request_key:'pg-incident-first'};
+const savedIncident=(await saveIncident(incident)).rows[0].r;assert.equal(savedIncident.folio,'INC-0011');assert.equal((await saveIncident(incident)).rows[0].r.id,savedIncident.id);
+assert.equal((await saveIncident({...incident,request_key:'pg-incident-second'})).rows[0].r.folio,'INC-0012');
+await assert.rejects(saveIncident({...incident,id:savedIncident.id,status:'Cerrada'}));await saveIncident({...incident,id:savedIncident.id,status:'Cerrada',action:'Acción completada'});
+await assert.rejects(saveIncident({...incident,request_key:'pg-incident-bad',order_id:999999}));await assert.rejects(saveIncident({...incident,request_key:'pg-incident-bad-np',np:'AJENO'}));
+assert.deepEqual((await state()).lots,beforeIncident.lots);await assert.rejects(db.query('select * from public.prisma_incidents'));console.log('PASS incidents start at 11, link valid orders, deduplicate retries and preserve stock');
+await db.exec('reset role');await db.exec(readFileSync(new URL('../supabase/incidents.sql',import.meta.url),'utf8'));await db.exec('set role authenticated');assert.equal((await state()).incidents.length,2);assert.equal((await state()).preparations.length,1);console.log('PASS incident upgrade preserves reports, numbering and preparation log');
+await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(state());await assert.rejects(savePrep(preparation));await assert.rejects(saveIncident(incident));console.log('PASS signed-in nonmembers cannot access inventory or preparations');
 await db.close();

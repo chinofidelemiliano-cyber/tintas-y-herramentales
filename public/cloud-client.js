@@ -22,14 +22,14 @@ export async function getCloud(){
    const data=await r.json();
    if(!r.ok){
     if(r.status===401)save(null);
-    if(data.code==='PGRST202'||data.code==='42883')throw Error(name==='prisma_save_preparation'?'Falta activar los tiempos de preparación. Ejecuta supabase/preparation-times.sql en SQL Editor.':'Falta ejecutar el archivo supabase/setup.sql en SQL Editor de Supabase.');
+    if(data.code==='PGRST202'||data.code==='42883')throw Error(name==='prisma_save_incident'?'Falta activar incidencias. Ejecuta supabase/incidents.sql en SQL Editor.':name==='prisma_save_preparation'?'Falta activar los tiempos de preparación. Ejecuta supabase/preparation-times.sql en SQL Editor.':'Falta ejecutar el archivo supabase/setup.sql en SQL Editor de Supabase.');
     throw Error(data.message||'No se pudo guardar en la base de datos.');
    }
    return data;
   }
   return {hasSession:()=>!!session,email:()=>session?.user?.email||'',signIn:(email,password)=>auth('token?grant_type=password',{email,password}),
    signOut:async()=>{try{if(session)await fetch(config.supabaseUrl+'/auth/v1/logout',{method:'POST',headers:{apikey:config.publishableKey,Authorization:'Bearer '+session.access_token}});}finally{save(null);}},
-   state:()=>rpc('prisma_state'),action:(operation,payload)=>operation==='preparations'?rpc('prisma_save_preparation',{payload}):rpc('prisma_action',{operation,payload})};
+   state:()=>rpc('prisma_state'),action:(operation,payload)=>operation==='incidents'?rpc('prisma_save_incident',{payload}):operation==='preparations'?rpc('prisma_save_preparation',{payload}):rpc('prisma_action',{operation,payload})};
  })();
  return initialized;
 }

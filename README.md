@@ -98,3 +98,13 @@ SQLite crea la tabla al arrancar. Para una base Supabase ya instalada, ejecuta *
 La sección «Configuración» permite cambiar el nombre mostrado del sitio, idioma de interfaz (español o inglés), tema claro/oscuro/automático, color principal, formato de fechas, densidad y apertura inicial de las listas de inventario. Los ajustes se conservan en localStorage **solo en ese navegador**; no cambian el inventario ni los ajustes de otros usuarios. Incluye restablecimiento de valores y selector de idioma en el acceso. El formato de fechas solo modifica la presentación, no las fechas almacenadas ni los períodos de cierre.
 
 Los PDF usan el nombre elegido, el idioma de encabezados y numeración y el formato de fecha; los nombres de productos y textos capturados se conservan. La moneda de operación sigue siendo MXN y no se aplica conversión monetaria. Las cantidades siguen controlándose en gramos, con garrafones estimados de 4 kg. No requiere una migración de Supabase.
+
+## Incidencias y reporte individual
+
+La sección «Incidencias» sigue el registro proporcionado: folio, fecha, ODP/NP, máquina, incidencia, responsable, acción realizada, impacto y estatus. Las máquinas son Mark Andy, Comco 1, Comco 2 y Maquina China; responsables: Diseño, Producción, Preprensa, Proveedor, Mantenimiento o Compartida. El formulario consulta las órdenes y NP ya registrados, sin inventar referencias.
+
+La primera incidencia nueva recibe **INC-0011** y continúa en orden. El servidor asigna el folio dentro de la transacción; las ediciones lo conservan y el identificador de solicitud evita duplicados por reintento. No se importaron como registros los folios anteriores de la imagen. Las incidencias no cambian existencias ni generan consumos. Para cerrar se requiere una acción realizada.
+
+Dar de alta descarga automáticamente un PDF individual, que también puede descargarse desde la fila de la incidencia. La primera hoja es un formato A4 vertical para registro comparativo: datos generales, espacios en blanco para pegar muestras físicas ANTES/DESPUÉS, color observado, resultado de prueba, observaciones y firmas de Preprensa, Calidad y Encargado de producción. Las hojas siguientes conservan la descripción, las acciones y los demás datos completos, sin recortar textos largos. Los espacios físicos no son carga de fotos ni firmas digitales. El registro completo del mes también se exporta a PDF respetando los filtros.
+
+Para una base Supabase existente, ejecuta **supabase/incidents.sql** completo en SQL Editor; no borra registros ni reinicia folios. La instalación inicial setup.sql actualizada ya lo incluye. La función de guardado valida membresía, orden/NP y opciones, y serializa escrituras para asignar folios sin duplicados.
