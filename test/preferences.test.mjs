@@ -12,8 +12,8 @@ test('date format selection is independent of stock dates and uses chosen langua
  assert.equal(formatDisplayDate('2026-11-04',{...defaults,dateFormat:'dmy'}),'04/11/2026');assert.equal(formatDisplayDate('2026-11-04',{...defaults,dateFormat:'mdy'}),'11/04/2026');assert.equal(formatDisplayDate('2026-11-04',{...defaults,dateFormat:'iso'}),'2026-11-04');assert.match(formatDisplayDate('2026-11-04',{...defaults,language:'en'}),/Nov/);
  assert.equal(translate('Configuración','en'),'Settings');assert.equal(translate('Configuración','es'),'Configuración');assert.equal(translate('Amarillo Process','en'),'Amarillo Process');
 });
-test('PDF uses chosen site name and English pagination without returning removed branding',()=>{
- const bytes=createTablePDF({title:'Inventory',columns:[{label:'Batch',width:778}],rows:[['79091']],brand:'Mi taller',language:'en'});const pdf=Buffer.from(bytes).toString('latin1');assert.ok(pdf.includes('(Mi taller)'));assert.ok(pdf.includes('Page 1 of 1'));assert.ok(!/prisma|identilabel/i.test(pdf));
+test('PDF uses English pagination without printing site names or removed branding',()=>{
+ const bytes=createTablePDF({title:'Inventory',columns:[{label:'Batch',width:778}],rows:[['79091']],brand:'Mi taller',language:'en'});const pdf=Buffer.from(bytes).toString('latin1');assert.ok(!pdf.includes('Mi taller'));assert.ok(pdf.includes('Page 1 of 1'));assert.ok(!/prisma|identilabel/i.test(pdf));
 });
 test('report logo setting accepts only valid compact JPEG images',async()=>{
  const {readFileSync}=await import('node:fs');const logo='data:image/jpeg;base64,'+readFileSync(new URL('./fixtures/before.jpg',import.meta.url)).toString('base64');

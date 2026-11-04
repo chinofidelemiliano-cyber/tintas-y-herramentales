@@ -27,5 +27,5 @@ test('monthly PDF keeps summary, income and expenses in one document with contin
  ]});
  const pdf=Buffer.from(bytes).toString('latin1');
  for(const t of ['Resumen mensual','Ingresos del mes','Egresos del mes','Compra 49','No se registraron egresos.'])assert.ok(pdf.includes(t),t);
- const pages=Number(pdf.match(/\/Count (\d+)/)[1]);assert.ok(pages>=4);assert.ok(pdf.includes(`Página ${pages} de ${pages}`));assert.ok(pdf.includes('51 registros'));
+ const pages=Number(pdf.match(/\/Count (\d+)/)[1]);assert.ok(pages>=4);assert.ok(pdf.includes(`Página ${pages} de ${pages}`));assert.ok(pdf.includes('Existencia inicial'));assert.ok(pdf.includes('Compra 49'));
 });

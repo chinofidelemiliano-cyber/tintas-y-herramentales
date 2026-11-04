@@ -1,3 +1,4 @@
+import {normalizePDFStyle,mmToPoints,pdfColor,logoLayout} from './pdf-style.js';
 import {jpegPhoto} from './incident-photos.js';
 // Dependency-free, paginated PDF table writer for browser and Node.
 // Built-in Helvetica uses WinAnsi, including Spanish accents.
@@ -6,83 +7,77 @@ function bytes(text) {
   return Uint8Array.from([...text].map(c => {const n=c.codePointAt(0);return n<=255?n:extra.get(n)||63;}));
 }
 const literal = text => String(text ?? '').replace(/[\x00-\x1f]/g,' ').replaceAll('\\','\\\\').replaceAll('(','\\(').replaceAll(')','\\)');
-function width(text, size) {
-  // Conservative Helvetica widths keep cell text inside its column.
-  let units=0;
-  for(const c of text) units += /[ilI.,:;'!| ]/.test(c)?0.29:/[MWmw@%]/.test(c)?0.92:/[A-ZÁÉÍÓÚÑ]/.test(c)?0.73:0.59;
-  return units*size;
+const fontWidths={
+ sans:{upper:[667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611],lower:[556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500],digit:556,space:278},
+ serif:{upper:[722,667,667,722,611,556,722,722,333,389,722,611,889,722,722,556,722,667,556,611,722,722,944,722,722,611],lower:[444,500,444,500,444,333,500,500,278,278,500,278,778,500,500,500,500,333,389,278,500,500,722,500,500,444],digit:500,space:250}
+};
+function width(text,size,fontFamily='sans'){
+ if(fontFamily==='mono')return [...text].length*size*.6;
+ const metrics=fontWidths[fontFamily]||fontWidths.sans;let units=0;
+ for(const character of text){const c=character.normalize('NFD').replace(/[\u0300-\u036f]/g,'');const n=c.charCodeAt(0);
+  if(n>=65&&n<=90)units+=metrics.upper[n-65];else if(n>=97&&n<=122)units+=metrics.lower[n-97];else if(/[0-9]/.test(c))units+=metrics.digit;else if(c===' ')units+=metrics.space;else if('.,:;!'.includes(c))units+=metrics.space;else if('()[]-/'.includes(c))units+=333;else if(c==='—')units+=1000;else units+=556;
+ }
+ return units*size/1000;
 }
-function wrap(value, maxWidth, size) {
+
+function wrap(value, maxWidth, size, fontFamily='sans') {
   const text=String(value??'').replace(/\s+/g,' ').trim();
   if(!text)return [''];
   const lines=[];let line='';
   for(const word of text.split(' ')) {
-    if(line && width(line+' '+word,size)>maxWidth){lines.push(line);line='';}
-    if(width(word,size)<=maxWidth){line+=(line?' ':'')+word;continue;}
-    for(const c of word){if(line&&width(line+c,size)>maxWidth){lines.push(line);line='';}line+=c;}
+    if(line && width(line+' '+word,size,fontFamily)>maxWidth){lines.push(line);line='';}
+    if(width(word,size,fontFamily)<=maxWidth){line+=(line?' ':'')+word;continue;}
+    for(const c of word){if(line&&width(line+c,size,fontFamily)>maxWidth){lines.push(line);line='';}line+=c;}
   }
   if(line)lines.push(line);
   return lines;
 }
 
-export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary='',sections=[],brand='Tintas y herramentales',language='es',logo=null}) {
-  const logoImage=logo?{...jpegPhoto(logo),name:'ReportLogo'}:null;
-  const headerShift=logoImage?65:0;
-  const reports=[{title,columns,rows,summary},...sections];
-  const recordCount=reports.reduce((s,r)=>s+r.rows.length,0);
-  if(!columns?.length)throw Error('El reporte necesita columnas.');
-  const W=842,H=595,margin=32,bottom=H-42,size=7.3,lineHeight=11;
-  let totalWidth=columns.reduce((s,c)=>s+c.width,0);
-  if(totalWidth>W-2*margin)throw Error('Las columnas exceden el ancho de la página.');
-  const pages=[];let stream='',y=0;
-  const text=(x,top,value,fontSize=size,bold=false,color='0.23 0.29 0.26')=>{stream+=`BT /${bold?'F2':'F1'} ${fontSize} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${(H-top).toFixed(2)} Tm (${literal(value)}) Tj ET\n`;};
-  const rect=(x,top,w,h,color)=>{stream+=`${color} rg ${x} ${H-top-h} ${w} ${h} re f\n`;};
-  let noteLines=notes.flatMap(n=>wrap(n,totalWidth,8));
-  function newPage(){
-    if(stream)pages.push(stream);
-    stream='';if(logoImage){const ratio=Math.min(350/logoImage.width,60/logoImage.height),w=logoImage.width*ratio,h=logoImage.height*ratio;stream+=`q ${w} 0 0 ${h} ${(W-w)/2} ${H-8-h} cm /ReportLogo Do Q\n`;}text(margin,35+headerShift,brand,10,true);text(margin,58+headerShift,title,17,true);
-    text(margin,75+headerShift,subtitle,8,false,'0.48 0.54 0.49');
-    y=88+headerShift;
-    for(const n of noteLines){text(margin,y,n,8);y+=11;}
-    y+=5;
-    const labels=columns.map(c=>wrap(c.label,c.width-12,size));
-    const headerHeight=Math.max(...labels.map(l=>l.length))*lineHeight+12;
-    rect(margin,y,totalWidth,headerHeight,'0.90 0.94 0.91');
-    let x=margin;labels.forEach((lines,i)=>{lines.forEach((l,j)=>text(x+6,y+12+j*lineHeight,l,size,true));x+=columns[i].width;});
-    y+=headerHeight;
-  }
-  for(const report of reports){
-  ({title,columns,rows,summary=''}=report);
-  if(!columns?.length)throw Error('El reporte necesita columnas.');
-  totalWidth=columns.reduce((s,c)=>s+c.width,0);
-  if(totalWidth>W-2*margin)throw Error('Las columnas exceden el ancho de la página.');
-  noteLines=[...notes,...(report.notes||[])].flatMap(n=>wrap(n,totalWidth,8));
-  newPage();
-  for(let rowIndex=0;rowIndex<rows.length;rowIndex++) {
-    const lines=columns.map((c,i)=>wrap(rows[rowIndex][i],c.width-12,size));
-    const maxLines=Math.max(...lines.map(l=>l.length));let offset=0;
-    while(offset<maxLines){
-      let count=Math.min(maxLines-offset,Math.floor((bottom-y-12)/lineHeight));
-      if(count<1){newPage();count=Math.min(maxLines-offset,Math.floor((bottom-y-12)/lineHeight));}
-      if(count<1)throw Error('Las notas del reporte no dejan espacio para la tabla.');
-      const height=count*lineHeight+12;
-      if(rowIndex%2===0)rect(margin,y,totalWidth,height,'0.97 0.98 0.97');
-      let x=margin;
-      lines.forEach((cell,i)=>{cell.slice(offset,offset+count).forEach((l,j)=>text(x+6,y+12+j*lineHeight,l));x+=columns[i].width;});
-      stream+=`0.89 0.92 0.89 RG 0.3 w ${margin} ${H-y-height} m ${margin+totalWidth} ${H-y-height} l S\n`;
-      y+=height;offset+=count;
-      if(offset<maxLines)newPage();
-    }
+export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary='',sections=[],language='es',logo=null,pdfStyle={}}) {
+ const style=normalizePDFStyle(pdfStyle),logoImage=logo?{...jpegPhoto(logo),name:'ReportLogo'}:null;
+ const W=842,H=595,margin=mmToPoints(style.margin),bottom=H-margin-16,size=style.fontSize,lineHeight=size+3,padding={compact:6,normal:10,relaxed:15}[style.rowSpacing],available=W-2*margin;
+ const layout=logoLayout(logoImage,W,style),reports=[{title,columns,rows,summary},...sections];
+ const textColor=pdfColor(style.textColor),headerColor=pdfColor(style.headerColor),headerText=pdfColor(style.headerTextColor),titleColor=pdfColor(style.titleColor),lineColor=pdfColor(style.lineColor);
+ const pages=[];let stream='',y=0,currentColumns=[],noteLines=[];
+ const wrapped=(value,width,size)=>wrap(value,width,size,style.fontFamily);
+ const text=(x,top,value,fontSize=size,bold=false,color=textColor)=>{stream+=`BT /${bold?'F2':'F1'} ${fontSize} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${(H-top).toFixed(2)} Tm (${literal(value)}) Tj ET\n`;};
+ const rect=(x,top,w,h,color)=>{stream+=`${color} rg ${x} ${H-top-h} ${w} ${h} re f\n`;};
+ function newPage(){
+  if(stream)pages.push(stream);stream='';y=margin;
+  if(layout){stream+=`q ${layout.width} 0 0 ${layout.height} ${layout.x} ${H-layout.y-layout.height} cm /ReportLogo Do Q\n`;y=layout.y+layout.height+mmToPoints(style.logoGap);}
+  if(style.showTitle){text(margin,y+style.titleSize,title,style.titleSize,true,titleColor);y+=style.titleSize+10;}
+  if(style.showIssuedDate&&subtitle){text(margin,y+9,subtitle,8);y+=18;}
+  for(const n of noteLines){text(margin,y+8,n,8);y+=11;}
+  y+=6;
+  const labels=currentColumns.map(c=>wrapped(c.label,c.width-12,size)),height=Math.max(...labels.map(l=>l.length))*lineHeight+padding;
+  rect(margin,y,available,height,headerColor);let x=margin;
+  labels.forEach((lines,i)=>{lines.forEach((line,j)=>text(x+6,y+size+padding/2+j*lineHeight,line,size,true,headerText));x+=currentColumns[i].width;});y+=height;
+ }
+ for(const report of reports){
+  ({title,columns,rows,summary=''}=report);if(!columns?.length)throw Error('El reporte necesita columnas.');
+  const total=columns.reduce((sum,c)=>sum+c.width,0);if(!Number.isFinite(total)||total<=0)throw Error('Anchos de columna no válidos.');currentColumns=columns.map(c=>({...c,width:c.width*available/total}));
+  noteLines=style.showNotes?[...notes,...(report.notes||[])].flatMap(n=>wrapped(n,available,8)):[];newPage();
+  for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
+   const lines=currentColumns.map((c,i)=>wrapped(rows[rowIndex][i],c.width-12,size)),maxLines=Math.max(...lines.map(l=>l.length));let offset=0;
+   while(offset<maxLines){
+    let count=Math.min(maxLines-offset,Math.floor((bottom-y-padding)/lineHeight));
+    if(count<1){newPage();count=Math.min(maxLines-offset,Math.floor((bottom-y-padding)/lineHeight));}
+    if(count<1)throw Error('El encabezado no deja espacio para la tabla. Reduce el logo o el tamaño del texto.');
+    const height=count*lineHeight+padding;if(style.striped&&rowIndex%2===0)rect(margin,y,available,height,pdfColor(style.stripeColor));let x=margin;
+    lines.forEach((cell,i)=>{cell.slice(offset,offset+count).forEach((line,j)=>text(x+6,y+size+padding/2+j*lineHeight,line));x+=currentColumns[i].width;});
+    stream+=`${lineColor} RG 0.3 w ${margin} ${H-y-height} m ${margin+available} ${H-y-height} l S\n`;y+=height;offset+=count;if(offset<maxLines)newPage();
+   }
   }
   if(!rows.length){text(margin+6,y+18,report.emptyMessage||(language==='en'?'No records match the selected filters.':'Sin registros para los filtros seleccionados.'),9);y+=30;}
-  if(summary){const lines=wrap(summary,totalWidth,9);if(y+lines.length*13+15>bottom)newPage();y+=18;for(const l of lines){text(margin,y,l,9,true);y+=13;}}
-  }
-  pages.push(stream);
-  return assemblePDF(pages,{width:W,height:H,images:logoImage?[logoImage]:[],footer:(page,total)=>`${language==='en'?'Inventory':'Inventario'} · ${recordCount} ${language==='en'?'records':'registros'} · ${language==='en'?'Page':'Página'} ${page} ${language==='en'?'of':'de'} ${total}`});
+  if(style.showSummary&&summary){const lines=wrapped(summary,available,9);for(let index=0;index<lines.length;index++){if(y+24>bottom)newPage();y+=index===0?18:13;text(margin,y,lines[index],9,true);}}
+ }
+ pages.push(stream);
+ return assemblePDF(pages,{width:W,height:H,images:logoImage?[logoImage]:[],fontFamily:style.fontFamily,footer:style.showPageNumbers?(page,total)=>`${language==='en'?'Page':'Página'} ${page} ${language==='en'?'of':'de'} ${total}`:null});
 }
 
-export function assemblePDF(pages,{width:W,height:H,footer,images=[]}){
-  const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
+export function assemblePDF(pages,{width:W,height:H,footer,images=[],fontFamily='sans'}){
+  const fonts={sans:['Helvetica','Helvetica-Bold'],serif:['Times-Roman','Times-Bold'],mono:['Courier','Courier-Bold']}[fontFamily]||['Helvetica','Helvetica-Bold'];
+  const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','', `<< /Type /Font /Subtype /Type1 /BaseFont /${fonts[0]} /Encoding /WinAnsiEncoding >>`,`<< /Type /Font /Subtype /Type1 /BaseFont /${fonts[1]} /Encoding /WinAnsiEncoding >>`];
   const imageRefs=[];
   for(const image of images){
     const id=objects.length;imageRefs.push('/'+image.name+' '+id+' 0 R');

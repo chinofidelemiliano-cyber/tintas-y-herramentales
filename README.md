@@ -97,7 +97,7 @@ SQLite crea la tabla al arrancar. Para una base Supabase ya instalada, ejecuta *
 
 La sección «Configuración» permite cambiar el nombre mostrado del sitio, idioma de interfaz (español o inglés), tema claro/oscuro/automático, color principal, formato de fechas, densidad y apertura inicial de las listas de inventario. Los ajustes se conservan en localStorage **solo en ese navegador**; no cambian el inventario ni los ajustes de otros usuarios. Incluye restablecimiento de valores y selector de idioma en el acceso. El formato de fechas solo modifica la presentación, no las fechas almacenadas ni los períodos de cierre.
 
-Los PDF usan el nombre elegido, el idioma de encabezados y numeración y el formato de fecha; los nombres de productos y textos capturados se conservan. La moneda de operación sigue siendo MXN y no se aplica conversión monetaria. Las cantidades siguen controlándose en gramos, con garrafones estimados de 4 kg. No requiere una migración de Supabase.
+Los PDF usan el logo elegido, el idioma de encabezados y numeración y el formato de fecha; los nombres de productos y textos capturados se conservan. La moneda de operación sigue siendo MXN y no se aplica conversión monetaria. Las cantidades siguen controlándose en gramos, con garrafones estimados de 4 kg. No requiere una migración de Supabase.
 
 ## Incidencias y reporte individual
 
@@ -124,3 +124,11 @@ Para actualizar Supabase en un solo paso, ejecuta **supabase/update-inventory-an
 En **Configuración → Logo de reportes** se puede seleccionar un archivo PNG o JPG y guardar la configuración. El navegador prepara una copia JPEG para impresión y guarda el logo en las preferencias locales. Se conserva al recargar y se incluye centrado, sin deformar su proporción, arriba de cada página de todas las exportaciones tabulares y reportes individuales de incidencias. El formato de incidencias reserva espacio para el logo, las fotos y las firmas sin superponerlos. Se puede quitar o reemplazar desde la misma sección.
 
 El logo se configura por navegador, como el nombre y el idioma: no se sincroniza con otras cuentas o dispositivos. No necesita SQL ni cambios de Supabase. Si una imagen solo está visible en el chat y no se dispone de su archivo, puede guardarse desde el dispositivo y cargarse directamente en esta sección. No se recrea ni se sustituye el logo por una imagen generada.
+
+## Personalización del diseño de PDF
+
+En **Configuración → Diseño de PDF** se ajustan el ancho máximo del logo en milímetros, alineación, separación, márgenes, fuente estándar (Helvetica, Times o Courier), tamaños de texto y título, colores de títulos/texto/encabezado/bordes/filas, espaciado y filas alternadas. El logo siempre conserva su proporción y se limita al espacio disponible. Un logo grande reduce el área de las fotos en el formato vertical de incidencias.
+
+El nombre del sitio no se imprime en ningún PDF. Por defecto las exportaciones muestran logo, título, datos y totales, sin subtítulos de marca, fecha de emisión o notas explicativas. Se pueden activar notas, fecha, título, totales y paginación individualmente. La opción «Solo logo, título y datos» restaura ese contenido mínimo. Los reportes individuales conservan sus campos, evidencia y firmas.
+
+La vista previa responde a los controles antes de guardar; «Descargar PDF de prueba» genera un archivo real con el diseño en edición y datos identificados como ejemplos. «Restablecer diseño PDF» no elimina el logo ni modifica otras preferencias. Los ajustes se guardan por navegador, se aplican a todas las exportaciones y no requieren SQL.
