@@ -13,3 +13,7 @@ test('report embeds both JPEG photographs as PDF image objects with elapsed time
  const record={folio:'INC-0011',date:'2026-11-04',order_ref:'OP-1',np:'NP1',machine:'Comco 2',responsible:'Producción',description:'Defecto',action:'Corregido',status:'Cerrada',impact:'Paro',before_photo:photo,after_photo:photo,started_at:'2026-11-04T10:00:00Z',ended_at:'2026-11-04T10:02:00Z'};
  const pdf=Buffer.from(createIncidentPDF(record)).toString('latin1');assert.equal((pdf.match(/\/Subtype \/Image/g)||[]).length,2);assert.ok(pdf.includes('/Before '));assert.ok(pdf.includes('/After '));assert.ok(pdf.includes('/DCTDecode'));assert.ok(pdf.includes('00:02:00'));
 });
+test('incident report repeats the header logo on portrait evidence and detail pages',()=>{
+ const record={folio:'INC-0011',date:'2026-11-04',order_ref:'OP-1',np:'NP1',machine:'Comco 2',responsible:'Producción',description:'Defecto',action:'Corregido',status:'Cerrada',impact:'Paro',before_photo:photo,after_photo:photo};
+ const pdf=Buffer.from(createIncidentPDF(record,{logo:photo})).toString('latin1');const pages=Number(pdf.match(/\/Count (\d+)/)[1]);assert.equal((pdf.match(/\/ReportLogo Do/g)||[]).length,pages);assert.equal((pdf.match(/\/Subtype \/Image/g)||[]).length,3);assert.ok(pdf.includes('Corregido'));
+});

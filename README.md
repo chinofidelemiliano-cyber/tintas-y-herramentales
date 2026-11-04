@@ -118,3 +118,9 @@ En una incidencia nueva, seleccionar una orden crea y guarda el cronómetro y el
 Las fotos se almacenan en las tablas protegidas de la incidencia; no se suben a un bucket público ni se guardan en el repositorio. Las respuestas de estado contienen indicadores de presencia, sin las imágenes completas. Las fotos se recuperan con una función autenticada al reanudar o descargar un reporte. Solo se aceptan JPEG de hasta 450,000 caracteres en data URL; el navegador reduce imágenes a un máximo de 1,200 píxeles y elimina metadatos mediante conversión en canvas. Las incidencias manuales previas siguen disponibles y no requieren fotos retroactivamente.
 
 Para actualizar Supabase en un solo paso, ejecuta **supabase/update-inventory-and-incidents.sql** completo. Requiere la instalación base. Actualiza los saldos una vez y añade el cronómetro, las fotos privadas y sus funciones de acceso. `supabase/incidents-timer.sql` actualiza solo el flujo de incidencias; `supabase/update-inventory.sql` actualiza solo el inventario.
+
+## Logo en los PDF
+
+En **Configuración → Logo de reportes** se puede seleccionar un archivo PNG o JPG y guardar la configuración. El navegador prepara una copia JPEG para impresión y guarda el logo en las preferencias locales. Se conserva al recargar y se incluye centrado, sin deformar su proporción, arriba de cada página de todas las exportaciones tabulares y reportes individuales de incidencias. El formato de incidencias reserva espacio para el logo, las fotos y las firmas sin superponerlos. Se puede quitar o reemplazar desde la misma sección.
+
+El logo se configura por navegador, como el nombre y el idioma: no se sincroniza con otras cuentas o dispositivos. No necesita SQL ni cambios de Supabase. Si una imagen solo está visible en el chat y no se dispone de su archivo, puede guardarse desde el dispositivo y cargarse directamente en esta sección. No se recrea ni se sustituye el logo por una imagen generada.

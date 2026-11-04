@@ -15,3 +15,9 @@ test('date format selection is independent of stock dates and uses chosen langua
 test('PDF uses chosen site name and English pagination without returning removed branding',()=>{
  const bytes=createTablePDF({title:'Inventory',columns:[{label:'Batch',width:778}],rows:[['79091']],brand:'Mi taller',language:'en'});const pdf=Buffer.from(bytes).toString('latin1');assert.ok(pdf.includes('(Mi taller)'));assert.ok(pdf.includes('Page 1 of 1'));assert.ok(!/prisma|identilabel/i.test(pdf));
 });
+test('report logo setting accepts only valid compact JPEG images',async()=>{
+ const {readFileSync}=await import('node:fs');const logo='data:image/jpeg;base64,'+readFileSync(new URL('./fixtures/before.jpg',import.meta.url)).toString('base64');
+ assert.equal(normalizePreferences({reportLogo:logo}).reportLogo,logo);assert.equal(normalizePreferences({reportLogo:'https://example.invalid/logo.svg'}).reportLogo,null);
+ const pdf=Buffer.from(createTablePDF({title:'Inventory',columns:[{label:'Batch',width:778}],rows:Array.from({length:80},(_,i)=>[String(i)]),logo})).toString('latin1');
+ const pages=Number(pdf.match(/\/Count (\d+)/)[1]);assert.ok(pages>1);assert.equal((pdf.match(/\/ReportLogo Do/g)||[]).length,pages);assert.equal((pdf.match(/\/Subtype \/Image/g)||[]).length,1);
+});
