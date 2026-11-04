@@ -40,3 +40,19 @@ export function groupByProvider(lots) {
   }
   return [...providers.values()].sort((a, b) => a.name.localeCompare(b.name, 'es-MX')).map(p => ({...p, groups: groupLots(p.lots)}));
 }
+
+// Keep opening balances separate from actual monthly income and expenses.
+export function monthlyMovementDetails(movements, lots, month, selectedLotIds = null) {
+  const byId = new Map(lots.map(l => [l.lot_id ?? l.id, l]));
+  const selected = selectedLotIds === null ? null : new Set(selectedLotIds);
+  const result = { in: [], out: [] };
+  for (const m of movements) {
+    if (!result[m.type] || m.date.slice(0, 7) !== month || (selected && !selected.has(m.lot_id))) continue;
+    const lot = byId.get(m.lot_id);
+    const category = lot?.category || 'tinta';
+    result[m.type].push({...m, name: lot?.name ?? m.name, code: lot?.code ?? m.code, lot: lot?.lot ?? m.lot,
+      unit: category === 'herramental' ? 'pzas' : 'g', value: m.grams * m.cost_kg / (category === 'herramental' ? 1 : 1000)});
+  }
+  for (const rows of Object.values(result)) rows.sort((a,b) => a.date.localeCompare(b.date) || a.id-b.id);
+  return result;
+}

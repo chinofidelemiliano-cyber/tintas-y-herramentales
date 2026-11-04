@@ -1,5 +1,5 @@
 import { createTablePDF } from './pdf-report.js';
-import { canonicalCode, splitContainers, groupLots, groupByProvider } from './inventory-model.js';
+import { canonicalCode, splitContainers, groupLots, groupByProvider, monthlyMovementDetails } from './inventory-model.js';
 const paths={box:'M3 7l9-4 9 4-9 4-9-4zm0 0v10l9 4 9-4V7M12 11v10',arrows:'M4 7h14m-4-4 4 4-4 4M20 17H6m4-4-4 4 4 4',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',file:'M14 2H6a2 2 0 0 0-2 2v16h16V8zm0 0v6h6M8 12h8M8 16h6',calendar:'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h2M14 14h2',search:'m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',plus:'M12 5v14M5 12h14',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',chevron:'m9 5 7 7-7 7',warning:'M12 3 2 21h20L12 3zm0 6v5m0 3v1',clock:'M12 8v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',money:'M3 5h18v14H3zM16 12h2M6 12h2M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0',check:'m5 12 4 4L19 6',info:'M12 11v6m0-10v1M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',x:'m6 6 12 12M6 18 18 6',filter:'M4 6h16M7 12h10M10 18h4',tool:'m14 6 4-4 4 4-4 4-4-4-8 8-4 4 4 4 4-4 4-8'};
 const icon=(name)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(paths[name]||paths.box).split('~').map(p=>`<path d="${p}"/>`).join('')}</svg>`;
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -107,7 +107,7 @@ function exportPDF(){
  try {
   const notes=[readOnly?'Vista previa · datos del PDF original. No representa movimientos guardados en línea.':'Datos del inventario registrado.'];
   if(query)notes.push('Búsqueda: '+query);
-  let title,columns,rows,summary='';
+  let title,columns,rows,summary='',sections=[];
   const col=(label,width)=>({label,width});
   if(view==='inventario'){
    const lots=visibleInventoryLots().sort((a,b)=>a.provider.localeCompare(b.provider,'es-MX')||a.code.localeCompare(b.code)||a.lot.localeCompare(b.lot));
@@ -144,8 +144,21 @@ function exportPDF(){
    columns=[col('Tinta / material',160),col('Código',95),col('Lote',85),col('Unidad',48),col('Inicial',75),col('Ingresos',75),col('Egresos',75),col('Final',75),col('Valor final MXN',90)];
    rows=lots.map(l=>[l.name,l.code,l.lot,l.category==='tinta'?'g':'pzas',num(l.opening),num(l.incoming),num(l.outgoing),num(l.closing),money(l.closing*l.cost_kg/(l.category==='tinta'?1000:1))]);
    summary=lots.length+' lotes · Valor final: '+money(lots.reduce((s,l)=>s+l.closing*l.cost_kg/(l.category==='tinta'?1000:1),0))+' MXN';
+   const detail=monthlyMovementDetails(data.movements,lots,month,lots.map(l=>l.lot_id??l.id));
+   const detailColumns=[col('Fecha',64),col('Tinta / material',120),col('Código',80),col('Lote',65),col('Cantidad',65),col('Unidad',40),col('Valor MXN',75),col('Motivo / orden de producción',269)];
+   sections=['in','out'].map(type=>{
+    const movements=detail[type];
+    const grams=movements.filter(m=>m.unit==='g').reduce((s,m)=>s+m.grams,0);
+    const pieces=movements.filter(m=>m.unit==='pzas').reduce((s,m)=>s+m.grams,0);
+    const total=movements.reduce((s,m)=>s+m.value,0);
+    return {title:(type==='in'?'Ingresos':'Egresos')+' del mes · '+monthLabel(month),columns:detailColumns,
+      rows:movements.map(m=>[m.date,m.name,m.code,m.lot,num(m.grams),m.unit,money(m.value),m.reason]),
+      notes:['Detalle correspondiente a los mismos lotes y filtros del resumen. La carga inicial es saldo de apertura; las devoluciones y cancelaciones se incluyen como ingresos.'],
+      emptyMessage:noHistory?'No hay historia registrada para este mes.':`No se registraron ${type==='in'?'ingresos':'egresos'} en este mes para los lotes seleccionados.`,
+      summary:`${movements.length} movimientos · ${num(grams)} g · ${num(pieces)} pzas · Valor: ${money(total)} MXN`};
+   });
   }
-  const pdf=createTablePDF({title,subtitle:'Identilabel México · Emitido el '+displayDate(data.today)+' · Moneda: MXN',notes,columns,rows,summary});
+  const pdf=createTablePDF({title,subtitle:'Identilabel México · Emitido el '+displayDate(data.today)+' · Moneda: MXN',notes,columns,rows,summary,sections});
   const blob=new Blob([pdf],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=url;a.download=`prisma-${view}-${view==='inventario'||view==='catalogo'?data.today:month}.pdf`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('PDF descargado con todos los resultados de los filtros.');
  }catch(error){toast('No se pudo exportar: '+error.message)}

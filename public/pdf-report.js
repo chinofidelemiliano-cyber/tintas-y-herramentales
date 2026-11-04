@@ -24,15 +24,17 @@ function wrap(value, maxWidth, size) {
   return lines;
 }
 
-export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=''}) {
+export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary='',sections=[]}) {
+  const reports=[{title,columns,rows,summary},...sections];
+  const recordCount=reports.reduce((s,r)=>s+r.rows.length,0);
   if(!columns?.length)throw Error('El reporte necesita columnas.');
   const W=842,H=595,margin=32,bottom=H-42,size=7.3,lineHeight=11;
-  const totalWidth=columns.reduce((s,c)=>s+c.width,0);
+  let totalWidth=columns.reduce((s,c)=>s+c.width,0);
   if(totalWidth>W-2*margin)throw Error('Las columnas exceden el ancho de la página.');
   const pages=[];let stream='',y=0;
   const text=(x,top,value,fontSize=size,bold=false,color='0.23 0.29 0.26')=>{stream+=`BT /${bold?'F2':'F1'} ${fontSize} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${(H-top).toFixed(2)} Tm (${literal(value)}) Tj ET\n`;};
   const rect=(x,top,w,h,color)=>{stream+=`${color} rg ${x} ${H-top-h} ${w} ${h} re f\n`;};
-  const noteLines=notes.flatMap(n=>wrap(n,totalWidth,8));
+  let noteLines=notes.flatMap(n=>wrap(n,totalWidth,8));
   function newPage(){
     if(stream)pages.push(stream);
     stream='';text(margin,35,'PRISMA · Tintas y herramentales',10,true);text(margin,58,title,17,true);
@@ -46,6 +48,12 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
     let x=margin;labels.forEach((lines,i)=>{lines.forEach((l,j)=>text(x+6,y+12+j*lineHeight,l,size,true));x+=columns[i].width;});
     y+=headerHeight;
   }
+  for(const report of reports){
+  ({title,columns,rows,summary=''}=report);
+  if(!columns?.length)throw Error('El reporte necesita columnas.');
+  totalWidth=columns.reduce((s,c)=>s+c.width,0);
+  if(totalWidth>W-2*margin)throw Error('Las columnas exceden el ancho de la página.');
+  noteLines=[...notes,...(report.notes||[])].flatMap(n=>wrap(n,totalWidth,8));
   newPage();
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++) {
     const lines=columns.map((c,i)=>wrap(rows[rowIndex][i],c.width-12,size));
@@ -63,14 +71,15 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
       if(offset<maxLines)newPage();
     }
   }
-  if(!rows.length){text(margin+6,y+18,'Sin registros para los filtros seleccionados.',9);y+=30;}
+  if(!rows.length){text(margin+6,y+18,report.emptyMessage||'Sin registros para los filtros seleccionados.',9);y+=30;}
   if(summary){const lines=wrap(summary,totalWidth,9);if(y+lines.length*13+15>bottom)newPage();y+=18;for(const l of lines){text(margin,y,l,9,true);y+=13;}}
+  }
   pages.push(stream);
   const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
   const kids=[];
   pages.forEach((content,i)=>{
     const pageId=objects.length,contentId=pageId+1;kids.push(`${pageId} 0 R`);
-    content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 ${margin} 21 Tm (${literal(`Prisma · ${rows.length} registros · Página ${i+1} de ${pages.length}`)}) Tj ET\n`;
+    content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 ${margin} 21 Tm (${literal(`Prisma · ${recordCount} registros · Página ${i+1} de ${pages.length}`)}) Tj ET\n`;
     objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>`);
     objects.push(`<< /Length ${bytes(content).length} >>\nstream\n${content}endstream`);
   });
