@@ -30,6 +30,16 @@ Se conservan dos saldos negativos del documento original, pendientes de revisió
 
 Las tintas vencidas se identifican en las órdenes. Este piloto permite seleccionarlas; la planta debe decidir su política de autorización. Los ingresos al mismo lote conservan el costo original; usa otro lote para costos diferentes. No hay carga automática de archivos de órdenes ni edición de órdenes confirmadas: cancela y registra una nueva con otro folio.
 
+## Catálogo y garrafones
+
+`public/catalog.json` contiene los 75 productos del catálogo PDF posterior: código, nombre, tipo, proveedor, caducidad, máximo, punto de recompra y costo por kilo. Máximos y puntos de recompra se convierten de kilogramos a gramos para el control interno. Al iniciar el servidor, una migración idempotente importa el catálogo, crea 10 productos sin existencias y actualiza las fichas de los 65 códigos existentes. No agrega lotes ni modifica cantidades, costos históricos o fechas de entrada. La vista estática utiliza el mismo catálogo.
+
+Los códigos se normalizan a mayúsculas. `UIAPP50EP021ID`, extraído originalmente unido a parte del nombre, se corrige a `APP50EP021ID` conforme al nuevo catálogo, conservando su lote y su saldo.
+
+El inventario se muestra por **código → lotes → garrafones de 4 kg**. Cada lote positivo se reparte visualmente en cantidades de 4,000 g y un último sobrante (7,041 g → 4,000 + 3,041 g). Es una **distribución estimada, pendiente de verificación física**, aprobada por el usuario: no son identificadores persistentes de envases ni cantidades medidas individualmente. Al cambiar el saldo del lote, se recalcula el reparto. Los consumos siguen registrándose por lote. Los lotes vacíos no generan garrafones y los negativos conservan una alerta sin crear envases ficticios.
+
+Los datos de catálogo sugieren la caducidad y el costo al registrar un nuevo lote. El costo histórico de un lote existente se conserva. El catálogo muestra productos sin stock; no se inventan existencias a partir de máximos o puntos de recompra.
+
 ## Validación
 
 ```sh

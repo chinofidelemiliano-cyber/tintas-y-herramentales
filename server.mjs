@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { canonicalCode } from './public/inventory-model.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(root, 'data'), { recursive: true });
@@ -14,6 +15,9 @@ CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY,folio TEXT NOT NULL UNI
 CREATE TABLE IF NOT EXISTS movements(id INTEGER PRIMARY KEY,lot_id INTEGER NOT NULL REFERENCES lots(id),type TEXT NOT NULL,grams REAL NOT NULL,cost_kg REAL NOT NULL,date TEXT NOT NULL,reason TEXT NOT NULL,order_id INTEGER REFERENCES orders(id));
 CREATE TABLE IF NOT EXISTS cuts(id INTEGER PRIMARY KEY,month TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL,snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
+for (const [column, definition] of Object.entries({maximum:'REAL NOT NULL DEFAULT 0',shelf_days:'INTEGER NOT NULL DEFAULT 365',cost_kg:'REAL NOT NULL DEFAULT 0',container_grams:'REAL NOT NULL DEFAULT 4000'})) {
+  if (!db.prepare('PRAGMA table_info(products)').all().some(c => c.name === column)) db.exec(`ALTER TABLE products ADD COLUMN ${column} ${definition}`);
+}
 const all = (q, ...p) => db.prepare(q).all(...p);
 const one = (q, ...p) => db.prepare(q).get(...p);
 const run = (q, ...p) => db.prepare(q).run(...p);
@@ -38,16 +42,37 @@ if (!one("SELECT value FROM metadata WHERE key='seeded'")) tx(() => {
   }
   run("INSERT INTO metadata VALUES('seeded','1')");run("INSERT INTO metadata VALUES('baseline',?)",today());
 });
+// Import once, retaining all lot balances, historical costs and movements.
+if (!one("SELECT value FROM metadata WHERE key='catalog_v1'")) tx(() => {
+  for (const old of all('SELECT * FROM products')) {
+    const code = canonicalCode(old.code);
+    if (old.code === code) continue;
+    const target = one('SELECT * FROM products WHERE code=? AND id<>?', code, old.id);
+    if (target) {
+      for (const lot of all('SELECT * FROM lots WHERE product_id=?', old.id)) {
+        if (one('SELECT id FROM lots WHERE product_id=? AND lot=?', target.id, lot.lot)) fail(`Revisa el lote duplicado ${lot.lot} antes de unificar ${code}.`);
+        run('UPDATE lots SET product_id=? WHERE id=?', target.id, lot.id);
+      }
+      run('DELETE FROM products WHERE id=?', old.id);
+    } else run('UPDATE products SET code=? WHERE id=?', code, old.id);
+  }
+  for (const p of JSON.parse(readFileSync(path.join(root,'public/catalog.json'),'utf8'))) {
+    run(`INSERT INTO products(code,name,kind,provider,category,minimum,maximum,shelf_days,cost_kg,container_grams) VALUES(?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(code) DO UPDATE SET name=excluded.name,kind=excluded.kind,provider=excluded.provider,minimum=excluded.minimum,maximum=excluded.maximum,shelf_days=excluded.shelf_days,cost_kg=excluded.cost_kg,container_grams=excluded.container_grams`,
+      canonicalCode(p.code),p.name,p.kind,p.provider,p.category,p.minimum,p.maximum,p.shelf_days,p.cost_kg,p.container_grams);
+  }
+  run("INSERT INTO metadata VALUES('catalog_v1','1')");
+});
 function state() {
   return {today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
     products:all('SELECT * FROM products ORDER BY name'),
-    lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
+    lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
     orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? AND type=\'out\'',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
 }
 function product(b) {
-  const code=required(b.code,'el código');
+  const code=canonicalCode(required(b.code,'el código'));
   const existing=one('SELECT * FROM products WHERE code=?',code);
   if(existing) return existing;
   const category=b.category==='herramental'?'herramental':'tinta';
@@ -65,7 +90,7 @@ function move(b) {
       const lot=required(b.lot,'el lote');
       l=one('SELECT * FROM lots WHERE product_id=? AND lot=?',p.id,lot);
       if(!l) {
-        const id=run('INSERT INTO lots(product_id,lot,entry_date,shelf_days,cost_kg,grams) VALUES(?,?,?,?,?,0)',p.id,lot,d,number(b.shelf_days??365,'Caducidad'),number(b.cost_kg,'Costo')).lastInsertRowid;
+        const id=run('INSERT INTO lots(product_id,lot,entry_date,shelf_days,cost_kg,grams) VALUES(?,?,?,?,?,0)',p.id,lot,d,number(b.shelf_days??p.shelf_days,'Caducidad'),number(b.cost_kg??p.cost_kg,'Costo')).lastInsertRowid;
         l=one('SELECT * FROM lots WHERE id=?',id);
       }
     }

@@ -27,3 +27,14 @@ test('monthly close snapshots balances, blocks closed-period writes and preserve
  await post('cuts',{month:current},400);await post('cuts',{month:prev});const s=await get(),cut=s.cuts.find(c=>c.month===prev);assert.ok(cut);const row=cut.snapshot.find(r=>r.lot_id===lot.id);assert.equal(row.incoming,50);assert.equal(row.closing,50);assert.equal(s.lots.find(l=>l.id===lot.id).grams,950);
  await post('movements',{type:'in',lot_id:lot.id,grams:1,date:d,reason:'Cerrado'},400);await post('cuts',{month:prev},400);assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,950);
 });
+test('catalog import matches codes without duplicating stock or changing historical lot costs',async()=>{
+ assert.equal(state.products.length,75);
+ const p=state.products.find(p=>p.code==='E3024P01');assert.equal(p.maximum,16000);assert.equal(p.minimum,4000);assert.equal(p.shelf_days,185);assert.equal(p.cost_kg,205);
+ assert.equal(state.lots.find(l=>l.code==='APP50EP021ID').grams,3152);
+ assert.equal(state.products.some(p=>p.code==='UIAPP50EP021ID'),false);
+ assert.equal(state.products.filter(p=>p.code==='E3024P01').length,1);
+ assert.equal(state.lots.filter(l=>l.code==='E3024P01').length,2);
+ assert.equal(state.products.find(p=>p.code==='FLMRC-164').name,'Rojo Cera');
+ assert.equal(state.lots.filter(l=>l.code==='FLMRC-164').length,0);
+ assert.ok(Math.abs(state.lots.reduce((s,l)=>s+l.grams*l.cost_kg/1000,0)-97813.18)<0.01);
+});
