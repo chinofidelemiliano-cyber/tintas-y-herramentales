@@ -34,15 +34,40 @@ export function createIncidentPDF(record,{dateLabel=record.date,language='es',lo
  comparison.forEach(([label,value],i)=>{const y=522+i*47;box(M,y,165,47,style.striped&&i%2===0?style.stripeColor:false);box(M+165,y,C-165,47,style.striped&&i%2===0?style.stripeColor:false);text(M+6,y+16,label,8,true);fitted(M+171,y+14,value||'',C-177,3);});
  text(M,690,tr('3. Firmas de validación','3. Validation signatures'),10,true);
  [tr('Preprensa','Prepress'),tr('Calidad','Quality'),tr('Encargado de producción','Production manager')].forEach((label,i)=>{const w=C/3;box(M+i*w,703,w,20,true);box(M+i*w,723,w,57);text(M+i*w+6,716,label,8,false,style.headerTextColor);});
- pages.push(stream);stream='';firstPage=false;heading(tr('DETALLE DE LA INCIDENCIA','INCIDENT DETAILS'));let y=100;
+ pages.push(stream);stream='';firstPage=false;heading(tr('DETALLE DE LA INCIDENCIA','INCIDENT DETAILS'));
  const fields=[...(record.started_at?[[tr('Inicio','Started'),record.started_at],[tr('Finalización','Ended'),record.ended_at||tr('En curso','Running')],[tr('Tiempo transcurrido','Elapsed time'),incidentClock(incidentSeconds(record))]]:[]),[tr('Elaborado por','Prepared by'),record.prepared_by||'—'],[tr('Orden de producción / NP','Production order / NP'),record.order_ref+(record.np?' / '+record.np:'')],[tr('Máquina','Machine'),record.machine],[tr('Responsable','Owner'),record.responsible],[tr('Impacto','Impact'),record.impact],[tr('Estatus','Status'),record.status],[tr('Incidencia','Incident'),record.description],[tr('Acción realizada','Action taken'),record.action||tr('Pendiente de capturar.','Pending.')],[tr('Color observado','Observed color'),record.color_observed||'—'],[tr('Resultado de la prueba','Test result'),record.test_result||'—'],[tr('Observaciones de validación','Validation notes'),record.validation_notes||'—']];
- for(const [label,value] of fields){
-  const lines=wrapPDFText(value,C-16,actualSize(9),style.fontFamily);
-  if(y+45>790-headerShift){pages.push(stream);stream='';heading(tr('DETALLE · CONTINUACIÓN','DETAILS · CONTINUED'));y=100;}
-  text(M,y,label,9,true);y+=17;
-  for(const line of lines){if(y>780-headerShift){pages.push(stream);stream='';heading(tr('DETALLE · CONTINUACIÓN','DETAILS · CONTINUED'));y=100;}text(M+6,y,line,9);y+=actualSize(9)+4;}
-  y+={compact:12,normal:17,relaxed:22}[style.rowSpacing];
+ const detailTop=82+headerShift,detailBottom=H-M-24,initialFont=actualSize(9),labelWidth=Math.min(155,C*.3);
+ const measured=fields.map(([label,value])=>({label,value,labels:wrapPDFText(label,labelWidth-12,initialFont-.5,style.fontFamily),lines:wrapPDFText(value,C-labelWidth-12,initialFont,style.fontFamily)}));
+ const rowHeight=row=>Math.max(row.labels.length,row.lines.length)*(initialFont+2.5)+8;
+ const write=(x,top,value,size,bold=false,color=style.textColor)=>{stream+=`BT /${bold?'F2':'F1'} ${size} Tf ${pdfColor(color)} rg 1 0 0 1 ${x} ${H-top} Tm (${pdfLiteral(value)}) Tj ET\n`;};
+ const rectangle=(x,top,width,height,fill)=>{if(fill)stream+=`${pdfColor(fill)} rg ${x} ${H-top-height} ${width} ${height} re f\n`;stream+=`${pdfColor(style.lineColor)} RG 0.5 w ${x} ${H-top-height} ${width} ${height} re S\n`;};
+ if(measured.reduce((sum,row)=>sum+rowHeight(row),0)<=detailBottom-detailTop){
+  let top=detailTop;
+  measured.forEach((row,index)=>{const height=rowHeight(row);rectangle(M,top,labelWidth,height,style.headerColor);rectangle(M+labelWidth,top,C-labelWidth,height,style.striped&&index%2===0?style.stripeColor:null);row.labels.forEach((line,j)=>write(M+6,top+initialFont+4+j*(initialFont+2.5),line,initialFont-.5,true,style.headerTextColor));row.lines.forEach((line,j)=>write(M+labelWidth+6,top+initialFont+4+j*(initialFont+2.5),line,initialFont));top+=height;});
+ }else{
+  // Long descriptions flow across two columns on the detail sheet; nothing is truncated.
+  const gap=16,columnWidth=(C-gap)/2;
+  function plan(size){
+   const output=[];let column=0,top=detailTop;const lineHeight=size+1.1;
+   function nextColumn(){column++;top=detailTop;return column<2;}
+   function label(text){const lines=wrapPDFText(text,columnWidth,size+.5,style.fontFamily);if(top+lines.length*(lineHeight+.5)+lineHeight+3>detailBottom&&!nextColumn())return false;for(const line of lines){output.push({x:M+column*(columnWidth+gap),y:top+size+.5,text:line,size:size+.5,bold:true});top+=lineHeight+.5;}top+=3;return true;}
+   for(const [name,value] of fields){
+    if(!label(name))return null;
+    for(const line of wrapPDFText(value,columnWidth,size,style.fontFamily)){
+     if(top+lineHeight>detailBottom){if(!nextColumn()||!label(name+tr(' (continuación)',' (continued)')))return null;}
+     output.push({x:M+column*(columnWidth+gap),y:top+size,text:line,size,bold:false});top+=lineHeight;
+    }
+    top+=Math.max(3,size*.5);
+   }
+   return output;
+  }
+  let layoutPlan=null;
+  for(let size=initialFont;size>=4;size-=.25){layoutPlan=plan(size);if(layoutPlan)break;}
+  if(!layoutPlan)layoutPlan=plan(4);
+  if(!layoutPlan)throw Error(tr('El detalle excede dos páginas incluso con formato compacto. Resume los textos para generar el reporte; no se recortaron datos.','The detail exceeds two pages even in compact format. Shorten the text to generate the report; no data was truncated.'));
+  for(const item of layoutPlan)write(item.x,item.y,item.text,item.size,item.bold,item.bold?style.titleColor:style.textColor);
  }
+
  pages.push(stream);
  return assemblePDF(pages,{width:W,height:H,images,fontFamily:style.fontFamily,footer:style.showPageNumbers?(page,total)=>record.folio+' · '+tr('Página','Page')+' '+page+' '+tr('de','of')+' '+total:null});
 }
