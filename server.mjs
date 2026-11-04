@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { canonicalCode } from './public/inventory-model.js';
 import { preparationMinutes } from './public/preparation-model.js';
+import {jpegPhoto,incidentSeconds} from './public/incident-photos.js';
 import { incidentMachines,incidentOwners,incidentImpacts,incidentStatuses,incidentFolio } from './public/incident-model.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS cuts(id INTEGER PRIMARY KEY,month TEXT NOT NULL UNIQU
 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
 db.exec(`CREATE TABLE IF NOT EXISTS preparations(id INTEGER PRIMARY KEY,date TEXT NOT NULL,folio TEXT NOT NULL,np TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,end_next_day INTEGER NOT NULL DEFAULT 0,minutes REAL NOT NULL,requested_date TEXT,requested_time TEXT,supplies TEXT NOT NULL,product TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '');`);
 db.exec(`CREATE TABLE IF NOT EXISTS incidents(id INTEGER PRIMARY KEY,incident_number INTEGER NOT NULL UNIQUE,date TEXT NOT NULL,order_id INTEGER NOT NULL REFERENCES orders(id),order_ref TEXT NOT NULL,np TEXT NOT NULL DEFAULT '',machine TEXT NOT NULL,description TEXT NOT NULL,responsible TEXT NOT NULL,action TEXT NOT NULL DEFAULT '',impact TEXT NOT NULL,status TEXT NOT NULL,prepared_by TEXT NOT NULL DEFAULT '',color_observed TEXT NOT NULL DEFAULT '',test_result TEXT NOT NULL DEFAULT '',validation_notes TEXT NOT NULL DEFAULT '',request_key TEXT UNIQUE);`);
+for(const [column,type] of Object.entries({timer_mode:'INTEGER NOT NULL DEFAULT 0',started_at:'TEXT',ended_at:'TEXT',before_photo:'TEXT',after_photo:'TEXT'}))if(!db.prepare('PRAGMA table_info(incidents)').all().some(c=>c.name===column))db.exec(`ALTER TABLE incidents ADD COLUMN ${column} ${type}`);
 for (const [column, definition] of Object.entries({maximum:'REAL NOT NULL DEFAULT 0',shelf_days:'INTEGER NOT NULL DEFAULT 365',cost_kg:'REAL NOT NULL DEFAULT 0',container_grams:'REAL NOT NULL DEFAULT 4000'})) {
   if (!db.prepare('PRAGMA table_info(products)').all().some(c => c.name === column)) db.exec(`ALTER TABLE products ADD COLUMN ${column} ${definition}`);
 }
@@ -67,6 +69,17 @@ if (!one("SELECT value FROM metadata WHERE key='catalog_v1'")) tx(() => {
   }
   run("INSERT INTO metadata VALUES('catalog_v1','1')");
 });
+// Authoritative stock count from the corrected PDF; apply once with an audit trail.
+if(!one("SELECT value FROM metadata WHERE key='inventory_pdf_corrected_v1'"))tx(()=>{
+ for(const r of JSON.parse(readFileSync(path.join(root,'data/inventory-corrected.json'),'utf8'))){
+  const l=one('SELECT l.* FROM lots l JOIN products p ON p.id=l.product_id WHERE p.code=? AND l.lot=?',canonicalCode(r.code),r.lot);
+  if(!l)fail('No se encontró el lote '+r.lot+' para actualizar el inventario.');
+  const difference=r.grams-l.grams;
+  if(Math.abs(difference)>0.000001){run('UPDATE lots SET grams=?,cost_kg=? WHERE id=?',r.grams,r.cost_kg,l.id);run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason) VALUES(?,?,?,?,?,?)',l.id,difference>0?'in':'out',Math.abs(difference),r.cost_kg,today(),'Actualización de existencias · PDF invee.pdf');}
+  else run('UPDATE lots SET cost_kg=? WHERE id=?',r.cost_kg,l.id);
+ }
+ run("INSERT INTO metadata VALUES('inventory_pdf_corrected_v1','1')");
+});
 // Preserve existing orders and movement references while allowing repeat production runs.
 if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
  db.exec('PRAGMA foreign_keys=OFF');
@@ -81,14 +94,35 @@ if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
  });}finally{db.exec('PRAGMA foreign_keys=ON');}
 }
 function state() {
-  return {incidents:all('SELECT * FROM incidents ORDER BY incident_number DESC').map(i=>({...i,folio:incidentFolio(i.incident_number)})),preparations:all('SELECT * FROM preparations ORDER BY date DESC,start_time DESC,id DESC'),today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
+  return {incidents:all('SELECT * FROM incidents ORDER BY incident_number DESC').map(({before_photo,after_photo,...i})=>({...i,has_before:!!before_photo,has_after:!!after_photo,elapsed_seconds:incidentSeconds(i),folio:incidentFolio(i.incident_number)})),preparations:all('SELECT * FROM preparations ORDER BY date DESC,start_time DESC,id DESC'),today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
     products:all('SELECT * FROM products ORDER BY name'),
     lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
     orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
 }
+function startIncident(b){
+ const old=b.request_key?one('SELECT * FROM incidents WHERE request_key=?',String(b.request_key)):null;
+ if(old){if(old.order_id!==Number(b.order_id))fail('Esta captura ya está vinculada a otra orden.');return {id:old.id,folio:incidentFolio(old.incident_number),started_at:old.started_at};}
+ const o=one('SELECT * FROM orders WHERE id=?',Number(b.order_id));if(!o)fail('Selecciona una orden registrada.');
+ const n=one('SELECT coalesce(max(incident_number),10)+1 AS n FROM incidents').n,started=new Date().toISOString();
+ const nps=all("SELECT DISTINCT np FROM order_items WHERE order_id=? AND np<>''",o.id),np=nps.length===1?nps[0].np:'';
+ const result=run("INSERT INTO incidents(incident_number,date,order_id,order_ref,np,machine,description,responsible,impact,status,request_key,timer_mode,started_at) VALUES(?,?,?,?,?,'','Registro en curso','','','Abierta',?,1,?)",n,today(),o.id,o.folio,np,b.request_key?String(b.request_key):null,started);
+ return {id:Number(result.lastInsertRowid),folio:incidentFolio(n),started_at:started};
+}
+function saveTimedIncident(b,old){
+ if(Number(b.order_id)!==old.order_id)fail('La orden del cronómetro no se puede cambiar.');
+ const finish=b.finish===true||!!old.ended_at;
+ const merged={...old,...b};for(const key of ['before_photo','after_photo']){merged[key]=Object.hasOwn(b,key)?b[key]:old[key];if(merged[key])jpegPhoto(merged[key]);}
+ if(finish&&(!merged.before_photo||!merged.after_photo))fail('Agrega la foto del defecto y la foto final para generar el formato.');
+ for(const [key,allowed] of [['machine',incidentMachines],['responsible',incidentOwners],['impact',incidentImpacts]])if(merged[key]&&!allowed.includes(merged[key]))fail('Opción no válida para '+key+'.');
+ const np=String(merged.np||'');if(np&&!one('SELECT id FROM order_items WHERE order_id=? AND np=?',old.order_id,np))fail('El NP no pertenece a esa orden.');
+ const ended=old.ended_at||(finish?new Date().toISOString():null);
+ run('UPDATE incidents SET np=?,machine=?,description=?,responsible=?,action=?,impact=?,status=?,prepared_by=?,color_observed=?,test_result=?,validation_notes=?,before_photo=?,after_photo=?,ended_at=? WHERE id=?',np,String(merged.machine||''),String(merged.description||'Defecto documentado en fotografía inicial.'),String(merged.responsible||''),String(merged.action||(finish?'Corrección documentada en fotografía final.':'')),String(merged.impact||''),finish?'Cerrada':'Abierta',String(merged.prepared_by||''),String(merged.color_observed||''),String(merged.test_result||''),String(merged.validation_notes||''),merged.before_photo||null,merged.after_photo||null,ended,old.id);
+ return {id:old.id,folio:incidentFolio(old.incident_number),started_at:old.started_at,ended_at:ended};
+}
 function saveIncident(b){
+ if(b.id){const current=one('SELECT * FROM incidents WHERE id=?',Number(b.id));if(current?.timer_mode)return saveTimedIncident(b,current);}
  if(b.request_key&&!b.id){const old=one('SELECT * FROM incidents WHERE request_key=?',String(b.request_key));if(old)return {id:old.id,folio:incidentFolio(old.incident_number)};}
  const d=b.date;
  if(!/^\d{4}-\d{2}-\d{2}$/.test(d||'')||!Number.isFinite(Date.parse(d))||new Date(d).toISOString().slice(0,10)!==d||d>today())fail('Fecha de incidencia no válida.');
@@ -226,12 +260,13 @@ const server=http.createServer(async(req,res)=>{
   try {
     if(url.pathname.startsWith('/api/')) {
       res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
+      if(req.method==='GET'&&/^\/api\/incidents\/\d+\/evidence$/.test(url.pathname)){const row=one('SELECT id,before_photo,after_photo FROM incidents WHERE id=?',Number(url.pathname.split('/')[3]));if(!row)fail('Incidencia no encontrada.');return res.end(JSON.stringify(row));}
       if(req.method==='GET' && url.pathname==='/api/state') return res.end(JSON.stringify(state()));
       if(req.method!=='POST') {res.statusCode=404;return res.end(JSON.stringify({error:'Ruta no encontrada.'}));}
       if(req.headers.origin && req.headers.origin!==`http://${req.headers.host}` && req.headers.origin!==`https://${req.headers.host}`) fail('Origen no permitido.');
-      let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>100000) fail('Solicitud demasiado grande.');}
+      let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>1000000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
-      const actions={'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       const result=tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true,...(result||{})}));return;
     }

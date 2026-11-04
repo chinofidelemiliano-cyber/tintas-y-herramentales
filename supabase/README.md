@@ -6,7 +6,7 @@ La URL y la clave publishable de `public/cloud-config.json` son públicas por di
 
 ## Pasos en el panel de Supabase
 
-1. Abre **SQL Editor → New query**. Pega el contenido completo de `setup.sql` y pulsa **Run**. Crea las tablas, los permisos y las funciones, e importa 75 productos y 88 lotes. El saldo inicial es 324,741 g netos. Repetirlo no reinicia las existencias ni duplica datos.
+1. Abre **SQL Editor → New query**. Pega el contenido completo de `setup.sql` y pulsa **Run**. Crea las tablas, los permisos y las funciones, e importa 75 productos y 88 lotes. El saldo inicial es 342,813 g netos. Repetirlo no reinicia las existencias ni duplica datos.
 2. En **Authentication → Users → Add user → Create new user**, crea tu usuario con correo y contraseña propios. Usa la opción de confirmar el correo al crearlo si el panel la ofrece. No compartas la contraseña.
 3. Abre otra consulta y pega `authorize-user.sql`. Cambia `CAMBIA_POR_TU_CORREO` por el correo exacto de tu usuario y pulsa **Run**. Este paso autoriza la cuenta a consultar y modificar el inventario.
 4. Abre `https://inventariostt.netlify.app/` e inicia sesión con ese correo y contraseña. La barra superior debe indicar **Base de datos conectada**. Registrar un movimiento debe persistir al recargar y desde otra sesión autorizada.
@@ -31,3 +31,9 @@ Si ya ejecutaste setup.sql antes de agregar esta sección, ejecuta ahora **prepa
 ## Actualizar: incidencias
 
 Ejecuta **incidents.sql** completo en SQL Editor después de la instalación base. Añade el registro protegido de incidencias y su función de guardado. La numeración empieza en INC-0011 únicamente cuando no existen incidencias; repetir la actualización conserva la numeración, los registros y el resto del inventario. No requiere reautorizar usuarios. Los reportes PDF se generan en el navegador con los datos guardados.
+
+## Actualización del PDF correcto y las fotos
+
+Ejecuta **update-inventory-and-incidents.sql** completo en SQL Editor. Aplica las existencias del PDF `invee.pdf` a los 88 lotes incluidos, registrando ajustes sin eliminar el historial; actualiza una sola vez y conserva movimientos posteriores si se repite. También instala cronómetros persistentes y evidencia fotográfica privada. No se necesita configurar buckets públicos ni claves secretas nuevas.
+
+`incidents-timer.sql` contiene únicamente la actualización de incidencias; `update-inventory.sql`, únicamente los saldos. Para instalaciones nuevas, setup.sql ya incluye los datos y funciones actualizados.

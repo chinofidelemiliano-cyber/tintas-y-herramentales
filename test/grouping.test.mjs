@@ -11,7 +11,7 @@ test('uploaded catalog has 75 unique codes and every original lot has a matching
  assert.equal(catalog.find(p=>p.code==='BLF105').name,'Cian Film');assert.equal(catalog.find(p=>p.code==='BLF105').kind,'Film');
 });
 test('same-code lots stay separate within one group with unchanged totals',()=>{
- const groups=groupLots(seed);assert.equal(groups.length,65);assert.equal(groups.reduce((s,g)=>s+g.grams,0),324741);
+ const groups=groupLots(seed);assert.equal(groups.length,65);assert.equal(groups.reduce((s,g)=>s+g.grams,0),342813);
  const yellow=groups.find(g=>g.code==='E3024P01');assert.equal(yellow.lots.length,2);assert.equal(yellow.grams,9053);
  assert.deepEqual(yellow.lots.map(l=>l.lot),['79091','77215']);assert.equal(canonicalCode(' flmami-162 '),'FLMAMI-162');
  assert.equal(canonicalCode('UIAPP50EP021ID'),'APP50EP021ID');
@@ -30,7 +30,7 @@ test('supplier dropdown groups retain every code, lot and balance without a disp
  assert.equal(providers.length,7);
  assert.equal(providers.flatMap(p=>p.groups).length,65);
  assert.equal(providers.flatMap(p=>p.lots).length,88);
- assert.equal(providers.reduce((sum,p)=>sum+p.grams,0),324741);
+ assert.equal(providers.reduce((sum,p)=>sum+p.grams,0),342813);
  assert.equal(providers.find(p=>p.name==='Graphic').groups.find(g=>g.code==='E3024P01').lots.length,2);
  assert.equal(groupByProvider([{...lots[0],provider:' Inkolor '},{...lots[1],provider:'inkolor'}]).length,1);
 });

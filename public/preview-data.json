@@ -360,7 +360,7 @@
     "entry_date": "2024-08-19",
     "shelf_days": 365,
     "cost_kg": 303.0,
-    "grams": 902
+    "grams": 2756
   },
   {
     "name": "Rojo 200",
@@ -371,7 +371,7 @@
     "entry_date": "2024-07-17",
     "shelf_days": 365,
     "cost_kg": 306.0,
-    "grams": -3374
+    "grams": 698
   },
   {
     "name": "Rojo 200",
@@ -426,7 +426,7 @@
     "entry_date": "2025-11-27",
     "shelf_days": 365,
     "cost_kg": 119.75,
-    "grams": -646
+    "grams": 3684
   },
   {
     "name": "Clean Print",
@@ -448,7 +448,7 @@
     "entry_date": "2026-08-10",
     "shelf_days": 185,
     "cost_kg": 79.0,
-    "grams": 4360
+    "grams": 8494
   },
   {
     "name": "Blanco Opaco",
@@ -701,7 +701,7 @@
     "entry_date": "2024-02-06",
     "shelf_days": 365,
     "cost_kg": 252.0,
-    "grams": 2154
+    "grams": 4000
   },
   {
     "name": "Barniz Brillante",
@@ -811,7 +811,7 @@
     "entry_date": "2026-07-28",
     "shelf_days": 365,
     "cost_kg": 210.0,
-    "grams": 322
+    "grams": 2158
   },
   {
     "name": "Negro Highcure",

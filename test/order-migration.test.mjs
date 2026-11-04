@@ -18,7 +18,7 @@ test('upgrading existing orders preserves balances, links and historical consump
  db.prepare('INSERT INTO orders(id,folio,client,date) VALUES(7,?,?,?)').run('OP-LEGACY','Cliente',date);
  db.prepare('INSERT INTO movements VALUES(1,1,?,?,?,?,?,NULL)').run('initial',1000,100,date,'Carga inicial');
  db.prepare('INSERT INTO movements VALUES(2,1,?,?,?,?,?,7)').run('out',100,100,date,'Orden OP-LEGACY');
- db.prepare("INSERT INTO metadata VALUES('seeded','1')").run();db.prepare("INSERT INTO metadata VALUES('baseline',?)").run(date);db.close();
+ db.prepare("INSERT INTO metadata VALUES('seeded','1')").run();db.prepare("INSERT INTO metadata VALUES('inventory_pdf_corrected_v1','1')").run();db.prepare("INSERT INTO metadata VALUES('baseline',?)").run(date);db.close();
  const port=18000+Math.floor(Math.random()*1000);
  try{for(let attempt=0;attempt<2;attempt++){
   const server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port),DB_PATH:dbPath},stdio:['ignore','pipe','pipe']});

@@ -16,7 +16,7 @@ before(async()=>{
  state=await get();fixture=new DatabaseSync(path.join(dir,'test.sqlite'));
 });
 after(async()=>{fixture?.close();if(server&&server.exitCode===null){server.kill();await new Promise(r=>server.once('exit',r))}rmSync(dir,{recursive:true,force:true})});
-test('PDF seed retains 88 lots, 324741 grams and two historical negative balances',async()=>{assert.equal(state.lots.length,88);assert.equal(state.lots.reduce((s,l)=>s+l.grams,0),324741);assert.equal(state.lots.filter(l=>l.grams<0).length,2);const r=await fetch(base);assert.equal(r.status,200);assert.match(await r.text(),/<main id="main">/)});
+test('PDF seed retains 88 lots, 342813 grams and no negative balances',async()=>{assert.equal(state.lots.length,88);assert.equal(state.lots.reduce((s,l)=>s+l.grams,0),342813);assert.equal(state.lots.filter(l=>l.grams<0).length,0);const r=await fetch(base);assert.equal(r.status,200);assert.match(await r.text(),/<main id="main">/)});
 test('income creates product and lot atomically, persists and can be consumed',async()=>{await post('movements',{type:'in',name:'Tinta piloto',code:'TEST-01',kind:'Base Agua',provider:'Pruebas',category:'tinta',lot:'LOTE-01',shelf_days:365,cost_kg:200,grams:1000,date:state.today,reason:'Compra de prueba'});const s=await get();const l=s.lots.find(l=>l.code==='TEST-01');assert.equal(l.grams,1000);assert.equal(s.products.filter(p=>p.code==='TEST-01').length,1);await post('movements',{type:'out',lot_id:l.id,grams:100,date:state.today,reason:'Muestra'});assert.equal((await get()).lots.find(x=>x.id===l.id).grams,900)});
 test('orders aggregate duplicate lots, deduct once, cancel once, reject duplicate folios and overspending',async()=>{const s=await get(),l=s.lots.find(l=>l.code==='TEST-01');await post('orders',{folio:'OP-TEST',client:'Prueba',date:s.today,lines:[{lot_id:l.id,grams:100},{lot_id:l.id,grams:200}]});let current=await get();assert.equal(current.lots.find(x=>x.id===l.id).grams,600);const o=current.orders.find(o=>o.folio==='OP-TEST');assert.equal(o.lines.length,1);await post('orders',{folio:'OP-TEST',client:'Duplicada',date:s.today,lines:[{lot_id:l.id,grams:10}]},400);await post('orders',{folio:'OP-EXCESS',client:'Exceso',date:s.today,lines:[{lot_id:l.id,grams:100},{lot_id:l.id,grams:600}]},400);current=await get();assert.equal(current.lots.find(x=>x.id===l.id).grams,600);assert.equal(current.orders.some(o=>o.folio==='OP-EXCESS'),false);await post('orders/cancel',{id:o.id});assert.equal((await get()).lots.find(x=>x.id===l.id).grams,900);await post('orders/cancel',{id:o.id},400);assert.equal((await get()).lots.find(x=>x.id===l.id).grams,900)});
 test('insufficient exits, invalid and future dates do not change inventory',async()=>{const s=await get(),l=s.lots.find(l=>l.code==='TEST-01');for(const b of [{grams:901,date:s.today},{grams:-1,date:s.today},{grams:1,date:'2026-02-31'},{grams:1,date:'2099-12-31'}])await post('movements',{type:'out',lot_id:l.id,reason:'Invalid',...b},400);assert.equal((await get()).lots.find(x=>x.id===l.id).grams,900)});
@@ -38,7 +38,7 @@ test('catalog import matches codes without duplicating stock or changing histori
  assert.equal(state.lots.filter(l=>l.code==='E3024P01').length,2);
  assert.equal(state.products.find(p=>p.code==='FLMRC-164').name,'Rojo Cera');
  assert.equal(state.lots.filter(l=>l.code==='FLMRC-164').length,0);
- assert.ok(Math.abs(state.lots.reduce((s,l)=>s+l.grams*l.cost_kg/1000,0)-97813.18)<0.01);
+ assert.ok(Math.abs(state.lots.reduce((s,l)=>s+l.grams*l.cost_kg/1000,0)-101316.83)<0.01);
 });
 test('reference-style weighing deducts only initial minus final and stores production fields',async()=>{
  let s=await get();const lot=s.lots.find(l=>l.code==='TEST-01'),before=lot.grams;
@@ -78,4 +78,15 @@ test('incidents start at INC-0011, link existing orders and preserve stock',asyn
  await post('incidents',{...body,id:result.id,status:'Cerrada',action:'Ajuste y verificación'});current=await get();assert.equal(current.incidents.find(i=>i.id===result.id).folio,'INC-0011');assert.equal(current.incidents.find(i=>i.id===result.id).status,'Cerrada');
  for(const change of [{order_id:999999},{np:'NP-AJENO'},{machine:'Desconocida'},{responsible:'Sin responsable'}])await post('incidents',{...body,request_key:'bad-'+JSON.stringify(change),...change},400);
  assert.deepEqual((await get()).lots.map(l=>[l.id,l.grams]),before);
+});
+test('timed incidents persist start, protect photo payloads and end only with both pictures',async()=>{
+ const {readFileSync}=await import('node:fs');const photo='data:image/jpeg;base64,'+readFileSync(new URL('./fixtures/before.jpg',import.meta.url)).toString('base64');
+ let s=await get();const order=s.orders.find(o=>o.folio==='OP-PENDING'&&o.status==='confirmed'),balance=s.lots.map(l=>[l.id,l.grams]);
+ const started=await post('incidents/start',{order_id:order.id,request_key:'timed-test-first'});const repeat=await post('incidents/start',{order_id:order.id,request_key:'timed-test-first'});assert.equal(started.id,repeat.id);assert.equal(started.started_at,repeat.started_at);
+ await post('incidents',{id:started.id,order_id:order.id,finish:true},400);
+ await post('incidents',{id:started.id,order_id:order.id,before_photo:photo,finish:false});s=await get();let row=s.incidents.find(i=>i.id===started.id);assert.ok(row.has_before);assert.equal(row.ended_at,null);assert.equal(Object.hasOwn(row,'before_photo'),false);
+ await post('incidents',{id:started.id,order_id:order.id,after_photo:'data:image/svg+xml;base64,AAAA',finish:true},400);
+ await post('incidents',{id:started.id,order_id:order.id,after_photo:photo,finish:true});s=await get();row=s.incidents.find(i=>i.id===started.id);assert.equal(row.status,'Cerrada');assert.ok(row.ended_at);assert.ok(row.has_after);
+ const evidence=await(await fetch(base+'/api/incidents/'+row.id+'/evidence')).json();assert.equal(evidence.before_photo,photo);assert.equal(evidence.after_photo,photo);
+ await post('incidents',{id:row.id,order_id:order.id,description:'Detalle actualizado',finish:true});assert.equal((await get()).incidents.find(i=>i.id===row.id).ended_at,row.ended_at);assert.deepEqual((await get()).lots.map(l=>[l.id,l.grams]),balance);
 });

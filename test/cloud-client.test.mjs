@@ -11,6 +11,7 @@ test('cloud connector requires login and uses only public configuration plus use
   if(url==='/cloud-config.json')return Response.json({enabled:true,supabaseUrl:'https://testproject.supabase.co',publishableKey:'sb_publishable_test_public_config'});
   if(url.includes('/auth/v1/token'))return Response.json({access_token:'fake-user-access-token',refresh_token:'fake-refresh-token',expires_in:3600,user:{email:'test@example.invalid'}});
   if(url.endsWith('/prisma_state'))return failState?Response.json({code:'PGRST202',message:'missing function'},{status:404}):Response.json({products:[],lots:[]});
+  if(url.endsWith('/prisma_start_incident')||url.endsWith('/prisma_incident_evidence'))return Response.json({ok:true});
   if(url.endsWith('/prisma_action')||url.endsWith('/prisma_save_preparation')||url.endsWith('/prisma_save_incident'))return Response.json({ok:true});
   if(url.endsWith('/logout'))return new Response(null,{status:204});
   throw Error('Unexpected URL');
@@ -22,6 +23,7 @@ test('cloud connector requires login and uses only public configuration plus use
  const action=calls.find(c=>c.url.endsWith('/prisma_action'));assert.equal(action.options.headers.Authorization,'Bearer fake-user-access-token');assert.equal(action.options.headers.apikey,'sb_publishable_test_public_config');assert.deepEqual(JSON.parse(action.options.body),{operation:'movements',payload:{grams:10}});
  await cloud.action('preparations',{folio:'OP-TEST'});const prep=calls.find(c=>c.url.endsWith('/prisma_save_preparation'));assert.deepEqual(JSON.parse(prep.options.body),{payload:{folio:'OP-TEST'}});
  await cloud.action('incidents',{order_id:7});const incident=calls.find(c=>c.url.endsWith('/prisma_save_incident'));assert.deepEqual(JSON.parse(incident.options.body),{payload:{order_id:7}});
+ await cloud.action('incidents/start',{order_id:7});await cloud.evidence(7);assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/prisma_incident_evidence')).options.body),{record_id:7});
  failState=true;await assert.rejects(cloud.state(),/setup.sql/);
  await cloud.signOut();assert.equal(cloud.hasSession(),false);assert.equal(storage.size,0);
 });

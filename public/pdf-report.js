@@ -78,13 +78,19 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   return assemblePDF(pages,{width:W,height:H,footer:(page,total)=>`${language==='en'?'Inventory':'Inventario'} · ${recordCount} ${language==='en'?'records':'registros'} · ${language==='en'?'Page':'Página'} ${page} ${language==='en'?'of':'de'} ${total}`});
 }
 
-export function assemblePDF(pages,{width:W,height:H,footer}){
+export function assemblePDF(pages,{width:W,height:H,footer,images=[]}){
   const objects=[null,'<< /Type /Catalog /Pages 2 0 R >>','', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'];
+  const imageRefs=[];
+  for(const image of images){
+    const id=objects.length;imageRefs.push('/'+image.name+' '+id+' 0 R');
+    let binary='';for(let offset=0;offset<image.data.length;offset+=8192)binary+=String.fromCharCode(...image.data.subarray(offset,offset+8192));
+    objects.push(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /${image.components===1?'DeviceGray':'DeviceRGB'} /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.data.length} >>\nstream\n${binary}\nendstream`);
+  }
   const kids=[];
   pages.forEach((content,i)=>{
     const pageId=objects.length,contentId=pageId+1;kids.push(`${pageId} 0 R`);
     if(footer)content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 32 21 Tm (${literal(footer(i+1,pages.length))}) Tj ET\n`;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>`);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << ${imageRefs.join(' ')} >> >> /Contents ${contentId} 0 R >>`);
     objects.push(`<< /Length ${bytes(content).length} >>\nstream\n${content}endstream`);
   });
   objects[2]=`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pages.length} >>`;
