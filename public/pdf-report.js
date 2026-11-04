@@ -37,7 +37,7 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   let noteLines=notes.flatMap(n=>wrap(n,totalWidth,8));
   function newPage(){
     if(stream)pages.push(stream);
-    stream='';text(margin,35,'PRISMA · Tintas y herramentales',10,true);text(margin,58,title,17,true);
+    stream='';text(margin,35,'Tintas y herramentales',10,true);text(margin,58,title,17,true);
     text(margin,75,subtitle,8,false,'0.48 0.54 0.49');
     y=88;
     for(const n of noteLines){text(margin,y,n,8);y+=11;}
@@ -79,7 +79,7 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   const kids=[];
   pages.forEach((content,i)=>{
     const pageId=objects.length,contentId=pageId+1;kids.push(`${pageId} 0 R`);
-    content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 ${margin} 21 Tm (${literal(`Prisma · ${recordCount} registros · Página ${i+1} de ${pages.length}`)}) Tj ET\n`;
+    content+=`BT /F1 8 Tf 0.5 0.57 0.51 rg 1 0 0 1 ${margin} 21 Tm (${literal(`Inventario · ${recordCount} registros · Página ${i+1} de ${pages.length}`)}) Tj ET\n`;
     objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>`);
     objects.push(`<< /Length ${bytes(content).length} >>\nstream\n${content}endstream`);
   });

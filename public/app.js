@@ -237,9 +237,9 @@ function exportPDF(){
       summary:`${movements.length} movimientos · ${num(grams)} g · ${num(pieces)} pzas · Valor: ${money(total)} MXN`};
    });
   }
-  const pdf=createTablePDF({title,subtitle:'Prisma · Emitido el '+displayDate(data.today)+' · Moneda: MXN',notes,columns,rows,summary,sections});
+  const pdf=createTablePDF({title,subtitle:'Control de planta · Emitido el '+displayDate(data.today)+' · Moneda: MXN',notes,columns,rows,summary,sections});
   const blob=new Blob([pdf],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download=`prisma-${view}-${view==='inventario'||view==='catalogo'?data.today:month}.pdf`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('PDF descargado con todos los resultados de los filtros.');
+  a.href=url;a.download=`reporte-${view}-${view==='inventario'||view==='catalogo'?data.today:month}.pdf`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);toast('PDF descargado con todos los resultados de los filtros.');
  }catch(error){toast('No se pudo exportar: '+error.message)}
 }
 load().then(()=>{if(location.hash)go(location.hash.slice(1))}).catch(e=>{main.innerHTML=empty('No pudimos conectar con el inventario',esc(e.message));});
