@@ -1,0 +1,25 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+test('cloud connector requires login and uses only public configuration plus user session tokens',async t=>{
+ const saved={fetch:globalThis.fetch,location:globalThis.location,sessionStorage:globalThis.sessionStorage};
+ t.after(()=>Object.assign(globalThis,saved));
+ globalThis.location={hostname:'inventariostt.netlify.app',search:''};
+ const storage=new Map();globalThis.sessionStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+ const calls=[];let failState=false;
+ globalThis.fetch=async(url,options={})=>{
+  calls.push({url,options});
+  if(url==='/cloud-config.json')return Response.json({enabled:true,supabaseUrl:'https://testproject.supabase.co',publishableKey:'sb_publishable_test_public_config'});
+  if(url.includes('/auth/v1/token'))return Response.json({access_token:'fake-user-access-token',refresh_token:'fake-refresh-token',expires_in:3600,user:{email:'test@example.invalid'}});
+  if(url.endsWith('/prisma_state'))return failState?Response.json({code:'PGRST202',message:'missing function'},{status:404}):Response.json({products:[],lots:[]});
+  if(url.endsWith('/prisma_action'))return Response.json({ok:true});
+  if(url.endsWith('/logout'))return new Response(null,{status:204});
+  throw Error('Unexpected URL');
+ };
+ const {getCloud}=await import('../public/cloud-client.js?test=connector');const cloud=await getCloud();
+ assert.equal(cloud.hasSession(),false);await assert.rejects(cloud.state(),/Inicia sesión/);
+ await cloud.signIn('test@example.invalid','fake-test-password');assert.equal(cloud.hasSession(),true);
+ assert.deepEqual(await cloud.state(),{products:[],lots:[]});await cloud.action('movements',{grams:10});
+ const action=calls.find(c=>c.url.endsWith('/prisma_action'));assert.equal(action.options.headers.Authorization,'Bearer fake-user-access-token');assert.equal(action.options.headers.apikey,'sb_publishable_test_public_config');assert.deepEqual(JSON.parse(action.options.body),{operation:'movements',payload:{grams:10}});
+ failState=true;await assert.rejects(cloud.state(),/setup.sql/);
+ await cloud.signOut();assert.equal(cloud.hasSession(),false);assert.equal(storage.size,0);
+});

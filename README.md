@@ -62,7 +62,7 @@ Las pruebas usan una base temporal y comprueban importación, altas, salidas, tr
 
 ## Alcance
 
-Aplicación piloto de un espacio de trabajo compartido, sin autenticación ni roles reales. No publicarla para uso operativo antes de incorporar usuarios, permisos, respaldos y revisión de datos. No se ha desplegado a un dominio público.
+El servidor local es un piloto de un espacio compartido sin inicio de sesión. La versión hospedada ya incluye el conector de Supabase y acceso con cuentas autorizadas, pero requiere ejecutar la configuración SQL y crear usuarios en el panel. Sigue siendo necesario revisar los datos y configurar respaldos antes de uso operativo. Consulta `supabase/README.md` para activar la conexión.
 
 En las tareas del entorno en la nube, usa este checkout existente: cada tarea ya está aislada; no crees un worktree salvo solicitud explícita del usuario.
 
@@ -70,6 +70,19 @@ En las tareas del entorno en la nube, usa este checkout existente: cada tarea ya
 
 `netlify.toml` indica que la carpeta pública es `public`, donde está `index.html`. En una importación desde GitHub, deja el directorio base en la raíz del repositorio, no configures un comando de compilación y usa `public` como directorio de publicación. Los archivos nuevos del piloto deben estar en la rama que Netlify despliega; guardarlos en el entorno local no los sube a GitHub.
 
-Para una carga manual, publica la carpeta `public` con `index.html` directamente dentro. Esto publica únicamente los archivos de la interfaz. El servidor `server.mjs` y la base SQLite no se ejecutan con este despliegue estático: todavía se requiere adaptar la API y la persistencia antes de usar el inventario desde Netlify. La navegación utiliza fragmentos (`#inventario`, `#ordenes`), por lo que no requiere redirecciones de rutas.
+Para una carga manual, publica la carpeta `public` con `index.html` directamente dentro. Esto publica únicamente los archivos de la interfaz. El servidor `server.mjs` y la base SQLite no se ejecutan con este despliegue estático. En el sitio hospedado, `cloud-client.js` usa Supabase Auth y funciones PostgreSQL para la persistencia; actívalas con los pasos de `supabase/README.md`. La navegación utiliza fragmentos (`#inventario`, `#ordenes`), por lo que no requiere redirecciones de rutas.
 
-Cuando el alojamiento estático no dispone de `/api/state`, la interfaz carga `public/preview-data.json` con las 88 filas del PDF y muestra un aviso de vista previa. Permite explorar pantallas y exportar datos; toda escritura se rechaza con una explicación. No utiliza almacenamiento local ni simula guardar órdenes. La carga inicial de esta vista se fecha al día de consulta y no representa historia real. Con el servidor Node activo se usa la base SQLite y se mantienen las operaciones normales.
+En localhost, cuando el alojamiento estático no dispone de `/api/state`, la interfaz carga `public/preview-data.json` con las 88 filas del PDF y muestra un aviso de vista previa. Permite explorar pantallas y exportar datos; toda escritura se rechaza con una explicación. No utiliza almacenamiento local ni simula guardar órdenes. La carga inicial de esta vista se fecha al día de consulta y no representa historia real. Con el servidor Node activo se usa la base SQLite y se mantienen las operaciones normales.
+
+## Conexión a Supabase
+
+`public/cloud-config.json` configura la URL y la clave publishable facilitadas por el usuario. No contiene claves secretas ni service_role. En el sitio hospedado se requiere iniciar sesión; `supabase/setup.sql` crea una base protegida, importa el inventario y ofrece las operaciones transaccionales del piloto. `supabase/authorize-user.sql` autoriza explícitamente a cada usuario creado en Authentication. Preparar estos archivos no los ejecuta en la cuenta de Supabase. Consulta `supabase/README.md` para la activación y las verificaciones.
+
+Validación PostgreSQL opcional, sin instalar dependencias en el proyecto:
+
+```sh
+npm install --prefix /tmp/prisma-pg-validation @electric-sql/pglite --no-save --package-lock=false
+PRISMA_PGLITE_MODULE=/tmp/prisma-pg-validation/node_modules/@electric-sql/pglite/dist/index.js node scripts/validate-supabase.mjs
+```
+
+Este script usa una base PostgreSQL temporal: comprueba importación, miembros autorizados, permisos de tablas, pesajes, descuentos, cancelación única, pendientes, cierres e importación idempotente. No se conecta al proyecto real.

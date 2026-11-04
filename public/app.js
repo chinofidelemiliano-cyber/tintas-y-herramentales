@@ -1,3 +1,4 @@
+import { getCloud } from './cloud-client.js';
 import { createTablePDF } from './pdf-report.js';
 import { canonicalCode, splitContainers, groupLots, groupByProvider, monthlyMovementDetails } from './inventory-model.js';
 const paths={box:'M3 7l9-4 9 4-9 4-9-4zm0 0v10l9 4 9-4V7M12 11v10',arrows:'M4 7h14m-4-4 4 4-4 4M20 17H6m4-4-4 4 4 4',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',file:'M14 2H6a2 2 0 0 0-2 2v16h16V8zm0 0v6h6M8 12h8M8 16h6',calendar:'M4 5h16v16H4zM8 2v6M16 2v6M4 10h16M8 14h2M14 14h2',search:'m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',plus:'M12 5v14M5 12h14',download:'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',chevron:'m9 5 7 7-7 7',warning:'M12 3 2 21h20L12 3zm0 6v5m0 3v1',clock:'M12 8v5l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',money:'M3 5h18v14H3zM16 12h2M6 12h2M14 12a2 2 0 1 1-4 0 2 2 0 0 1 4 0',check:'m5 12 4 4L19 6',info:'M12 11v6m0-10v1M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',x:'m6 6 12 12M6 18 18 6',filter:'M4 6h16M7 12h10M10 18h4',tool:'m14 6 4-4 4 4-4 4-4-4-8 8-4 4 4 4 4-4 4-8'};
@@ -7,12 +8,18 @@ const num=v=>Number(v).toLocaleString('es-MX',{maximumFractionDigits:2});
 const money=v=>Number(v).toLocaleString('es-MX',{style:'currency',currency:'MXN'});
 const displayDate=v=>new Date(v+'T12:00:00').toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}).replaceAll('.','');
 const monthLabel=v=>new Date(v+'-02T12:00:00').toLocaleDateString('es-MX',{month:'long',year:'numeric'});
-let readOnly=false;
+let readOnly=false,cloud=null;
 let data,view='inventario',tab='tinta',query='',typeFilter='',providerFilter='',statusFilter='',page=1,month='',catalogTab='tinta',movementTab='all';
 const perPage=10,modal=document.querySelector('#modal'),main=document.querySelector('#main');
 let toastTimer;
 function toast(t){const el=document.querySelector('#toast');el.textContent=t;el.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('visible'),3500)}
 async function load(){
+  cloud=await getCloud();
+  if(cloud){
+   if(!cloud.hasSession()){renderLogin();return;}
+   try{data=await cloud.state();readOnly=false;month ||= data.today.slice(0,7);document.querySelector('#today-label').textContent=displayDate(data.today);document.querySelector('.live').innerHTML='<i></i> Base de datos conectada';render();installLogout();return;}
+   catch(error){renderLogin(error.message);return;}
+  }
   const r=await fetch('/api/state');
   if(r.ok && (r.headers.get('content-type')||'').includes('application/json')) {
     data=await r.json();readOnly=false;
@@ -38,7 +45,19 @@ async function load(){
   document.querySelector('.live').innerHTML='<i></i> '+(readOnly?'Vista previa':'Sistema activo');
   render();
 }
-async function post(route,body){if(readOnly)throw Error('Esta es una vista previa. Falta conectar la base de datos para guardar cambios.');const r=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||'No se pudo guardar.');await load()}
+async function post(route,body){if(cloud){await cloud.action(route,body);await load();return;}if(readOnly)throw Error('Esta es una vista previa. Falta conectar la base de datos para guardar cambios.');const r=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||'No se pudo guardar.');await load()}
+function installLogout(){
+ let button=document.querySelector('#logout');
+ if(!button){button=document.createElement('button');button.id='logout';button.className='btn';button.textContent='Cerrar sesión';document.querySelector('.topbar-right').append(button);}
+ button.onclick=async()=>{await cloud.signOut();data=null;button.remove();renderLogin();};
+}
+function renderLogin(message=''){
+ data=null;document.querySelector('#navigation').innerHTML='';document.querySelector('#breadcrumb').textContent='Acceso al inventario';
+ document.querySelector('.live').innerHTML='<i></i> Acceso protegido';
+ main.innerHTML=`<section class="login-panel"><div class="eyebrow">IDENTILABEL MÉXICO</div><h1>Tu inventario, conectado.</h1><p class="subtitle">Inicia sesión con tu cuenta autorizada para registrar ingresos, consumos y producción en línea.</p><form id="login-form"><label class="field">Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label class="field">Contraseña<input name="password" type="password" autocomplete="current-password" required></label><p id="login-error" class="form-error" role="alert">${esc(message)}</p><button class="btn primary" type="submit">Entrar al inventario</button></form><p class="form-hint">Solo las cuentas autorizadas por el administrador pueden acceder. Si es la primera configuración, ejecuta setup.sql y autoriza tu usuario en Supabase.</p></section>`;
+ document.querySelector('#login-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button'),fields=new FormData(e.target);button.disabled=true;try{await cloud.signIn(fields.get('email'),fields.get('password'));e.target.reset();await load();}catch(error){document.querySelector('#login-error').textContent=error.message;button.disabled=false;}};
+ if(cloud.hasSession())installLogout();
+}
 const navs=[['inventario','box','Inventario'],['movimientos','arrows','Ingresos y egresos'],['catalogo','grid','Catálogo'],['ordenes','file','Órdenes de producción'],['cortes','calendar','Cortes mensuales']];
 function go(v){view=navs.some(n=>n[0]===v)?v:'inventario';query='';typeFilter='';providerFilter='';statusFilter='';page=1;document.querySelector('.sidebar').classList.remove('open');render()}
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
