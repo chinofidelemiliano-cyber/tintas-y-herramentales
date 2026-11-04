@@ -24,6 +24,8 @@ test('monthly close snapshots balances, blocks closed-period writes and preserve
  const current=state.today.slice(0,7),prevDate=new Date(current+'-01T12:00:00Z');prevDate.setUTCMonth(prevDate.getUTCMonth()-1);const prev=prevDate.toISOString().slice(0,7),d=prev+'-01';
  fixture.prepare("UPDATE metadata SET value=? WHERE key='baseline'").run(d);fixture.prepare("UPDATE movements SET date=? WHERE type='initial'").run(d);
  const lot=(await get()).lots.find(l=>l.code==='TEST-01');await post('movements',{type:'in',lot_id:lot.id,grams:50,date:d,reason:'Mes anterior'});
+ const pending={capture_mode:'weighing',status:'draft',folio:'OP-BLOCK-CLOSE',product:'Pendiente',pressman:'Julio',date:d,lines:[{lot_id:lot.id,np:'CLOSE-1',initial_grams:10,final_grams:''}]};
+ await post('orders',pending);await post('cuts',{month:prev},400);const pendingId=(await get()).orders.find(o=>o.folio==='OP-BLOCK-CLOSE').id;await post('orders/cancel',{id:pendingId});
  await post('cuts',{month:current},400);await post('cuts',{month:prev});const s=await get(),cut=s.cuts.find(c=>c.month===prev);assert.ok(cut);const row=cut.snapshot.find(r=>r.lot_id===lot.id);assert.equal(row.incoming,50);assert.equal(row.closing,50);assert.equal(s.lots.find(l=>l.id===lot.id).grams,950);
  await post('movements',{type:'in',lot_id:lot.id,grams:1,date:d,reason:'Cerrado'},400);await post('cuts',{month:prev},400);assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,950);
 });
@@ -37,4 +39,24 @@ test('catalog import matches codes without duplicating stock or changing histori
  assert.equal(state.products.find(p=>p.code==='FLMRC-164').name,'Rojo Cera');
  assert.equal(state.lots.filter(l=>l.code==='FLMRC-164').length,0);
  assert.ok(Math.abs(state.lots.reduce((s,l)=>s+l.grams*l.cost_kg/1000,0)-97813.18)<0.01);
+});
+test('reference-style weighing deducts only initial minus final and stores production fields',async()=>{
+ let s=await get();const lot=s.lots.find(l=>l.code==='TEST-01'),before=lot.grams;
+ await post('orders',{capture_mode:'weighing',folio:'OP-WEIGH',product:'Producto prueba',pressman:'Manuel',date:s.today,lines:[{lot_id:lot.id,np:'281-1',initial_grams:3278,final_grams:3186,meters:1266,notes:'Referencia de pesaje'}]});
+ s=await get();const o=s.orders.find(o=>o.folio==='OP-WEIGH');assert.equal(o.lines[0].grams,92);assert.equal(o.lines[0].initial_grams,3278);assert.equal(o.lines[0].final_grams,3186);assert.equal(o.lines[0].np,'281-1');assert.equal(o.lines[0].meters,1266);assert.equal(o.pressman,'Manuel');assert.equal(o.product,'Producto prueba');assert.equal(s.lots.find(l=>l.id===lot.id).grams,before-92);
+ await post('orders/cancel',{id:o.id});assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,before);
+});
+test('pending weights do not deduct stock and completing them deducts once',async()=>{
+ let s=await get();const lot=s.lots.find(l=>l.code==='TEST-01'),before=lot.grams;
+ const body={capture_mode:'weighing',folio:'OP-PENDING',product:'Don Finca',pressman:'Julio',date:s.today,status:'draft',lines:[{lot_id:lot.id,np:'118-1',initial_grams:2382,final_grams:''}]};
+ await post('orders',body);s=await get();const o=s.orders.find(o=>o.folio==='OP-PENDING');assert.equal(o.status,'draft');assert.equal(o.lines[0].final_grams,null);assert.equal(s.lots.find(l=>l.id===lot.id).grams,before);
+ await post('orders/update',{...body,id:o.id,status:'confirmed',lines:[{...body.lines[0],final_grams:2328}]});s=await get();assert.equal(s.orders.find(x=>x.id===o.id).status,'confirmed');assert.equal(s.lots.find(l=>l.id===lot.id).grams,before-54);
+ await post('orders/update',{...body,id:o.id,status:'confirmed',lines:[{...body.lines[0],final_grams:2328}]},400);assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,before-54);
+});
+test('repeated order numbers allow another NP but reject duplicate runs and invalid weights',async()=>{
+ let s=await get();const lot=s.lots.find(l=>l.code==='TEST-01'),before=lot.grams;
+ const body={capture_mode:'weighing',folio:'OP-PENDING',product:'Don Finca',pressman:'Julio',date:s.today,lines:[{lot_id:lot.id,np:'118-2',initial_grams:100,final_grams:90}]};
+ await post('orders',body);await post('orders',body,400);
+ for(const line of [{...body.lines[0],np:'BAD-1',final_grams:101},{...body.lines[0],np:'BAD-2',final_grams:''}])await post('orders',{...body,lines:[line]},400);
+ assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,before-10);
 });

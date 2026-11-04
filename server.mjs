@@ -63,12 +63,25 @@ if (!one("SELECT value FROM metadata WHERE key='catalog_v1'")) tx(() => {
   }
   run("INSERT INTO metadata VALUES('catalog_v1','1')");
 });
+// Preserve existing orders and movement references while allowing repeat production runs.
+if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
+ db.exec('PRAGMA foreign_keys=OFF');
+ try {tx(()=>{
+  db.exec(`CREATE TABLE orders_v2(id INTEGER PRIMARY KEY,folio TEXT NOT NULL,client TEXT NOT NULL,date TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'confirmed',pressman TEXT NOT NULL DEFAULT '',product TEXT NOT NULL DEFAULT '');
+    INSERT INTO orders_v2(id,folio,client,date,notes,status) SELECT id,folio,client,date,notes,status FROM orders;
+    DROP TABLE orders; ALTER TABLE orders_v2 RENAME TO orders;
+    CREATE TABLE order_items(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),lot_id INTEGER NOT NULL REFERENCES lots(id),np TEXT NOT NULL DEFAULT '',initial_grams REAL,final_grams REAL,grams REAL NOT NULL,cost_kg REAL NOT NULL,meters REAL,notes TEXT NOT NULL DEFAULT '');
+    INSERT INTO order_items(order_id,lot_id,grams,cost_kg) SELECT order_id,lot_id,grams,cost_kg FROM movements WHERE order_id IS NOT NULL AND type='out';`);
+  if(all('PRAGMA foreign_key_check').length) fail('No se pudo conservar la relación de las órdenes.');
+  run("INSERT INTO metadata VALUES('order_weighing_v1','1')");
+ });}finally{db.exec('PRAGMA foreign_keys=ON');}
+}
 function state() {
   return {today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
     products:all('SELECT * FROM products ORDER BY name'),
     lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
-    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? AND type=\'out\'',o.id)})),
+    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
 }
 function product(b) {
@@ -101,24 +114,51 @@ function move(b) {
   run('UPDATE lots SET grams=grams+? WHERE id=?',b.type==='in'?grams:-grams,l.id);
   run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason) VALUES(?,?,?,?,?,?)',l.id,b.type,grams,l.cost_kg,d,reason);
 }
-function createOrder(b) {
-  const d=date(b.date),folio=required(b.folio,'el folio'),client=required(b.client,'el cliente');
-  if(one('SELECT id FROM orders WHERE folio=?',folio)) fail('Ya existe una orden con ese folio.');
+function createOrder(b, existingId=null) {
+  const existing=existingId?one('SELECT * FROM orders WHERE id=?',existingId):null;
+  if(existingId && (!existing||existing.status!=='draft')) fail('Solo puedes editar registros pendientes.');
+  if(existing) date(existing.date);
+  const d=date(b.date),folio=required(b.folio,'la orden'),weighing=b.capture_mode==='weighing',draft=weighing&&b.status==='draft';
+  const product=String(b.product||'').trim(),pressman=String(b.pressman||'').trim(),client=weighing?String(b.client||product).trim():required(b.client,'el cliente');
+  if(weighing){required(product,'el producto');required(pressman,'el prensista');}
+  const peers=all("SELECT * FROM orders WHERE folio=? AND status<>'cancelled' AND id<>?",folio,existingId||0);
+  if(!weighing&&peers.length)fail('Ya existe una orden con ese folio.');
   if(!Array.isArray(b.lines)||!b.lines.length) fail('Agrega al menos una tinta.');
-  const grouped=new Map();
-  for(const line of b.lines) grouped.set(Number(line.lot_id),(grouped.get(Number(line.lot_id))||0)+number(line.grams,'Gramos',0.001));
-  for(const [id,grams] of grouped) {
-    const l=one('SELECT l.*,p.category FROM lots l JOIN products p ON p.id=l.product_id WHERE l.id=?',id);
-    if(!l || l.category!=='tinta') fail('Selecciona un lote de tinta.');
-    if(l.grams<grams) fail(`Existencia insuficiente en el lote ${l.lot}.`);
+  const items=[],grouped=new Map();
+  for(const line of b.lines){
+    const l=one('SELECT l.*,p.category FROM lots l JOIN products p ON p.id=l.product_id WHERE l.id=?',Number(line.lot_id));
+    if(!l||l.category!=='tinta')fail('Selecciona un lote de tinta.');
+    let initial=null,final=null,grams,np=String(line.np||'').trim();
+    if(weighing){
+      required(np,'el NP de cada renglón');
+      if(line.initial_grams===''||line.initial_grams==null)fail('Captura el peso inicial.');
+      initial=number(line.initial_grams,'Ingreso / peso inicial');
+      if(line.final_grams!==''&&line.final_grams!=null)final=number(line.final_grams,'Egreso / peso final');
+      if(final===null&&!draft)fail('Falta el peso final. Guarda como pendiente o completa los pesos.');
+      if(final!==null&&final>initial)fail('El peso final no puede superar al inicial. Registra una devolución o ajuste por separado.');
+      grams=final===null?0:Math.round((initial-final)*1000)/1000;
+    }else grams=number(line.grams,'Gramos',0.001);
+    const meters=line.meters===''||line.meters==null?null:number(line.meters,'Metros');
+    items.push({lot_id:l.id,np,initial,final,grams,cost_kg:l.cost_kg,meters,notes:String(line.notes||'')});
+    grouped.set(l.id,(grouped.get(l.id)||0)+grams);
   }
-  const id=run('INSERT INTO orders(folio,client,date,notes) VALUES(?,?,?,?)',folio,client,d,String(b.notes||'')).lastInsertRowid;
-  for(const [lotId,grams] of grouped) {
+  if(weighing&&peers.some(o=>o.date===d&&all('SELECT np FROM order_items WHERE order_id=?',o.id).some(i=>items.some(x=>x.np===i.np))))fail('Ya hay un registro de esta orden, fecha y NP. Revisa el registro existente.');
+  if(!draft)for(const [id,grams] of grouped){const l=one('SELECT * FROM lots WHERE id=?',id);if(grams>0&&l.grams<grams)fail(`Existencia insuficiente en el lote ${l.lot}.`);}
+  const status=draft?'draft':'confirmed';
+  let id=existingId;
+  if(existing){run('UPDATE orders SET folio=?,client=?,date=?,notes=?,status=?,pressman=?,product=? WHERE id=?',folio,client,d,String(b.notes||''),status,pressman,product,id);run('DELETE FROM order_items WHERE order_id=?',id);}
+  else id=Number(run('INSERT INTO orders(folio,client,date,notes,status,pressman,product) VALUES(?,?,?,?,?,?,?)',folio,client,d,String(b.notes||''),status,pressman,product).lastInsertRowid);
+  if(weighing)for(const i of items)run('INSERT INTO order_items(order_id,lot_id,np,initial_grams,final_grams,grams,cost_kg,meters,notes) VALUES(?,?,?,?,?,?,?,?,?)',id,i.lot_id,i.np,i.initial,i.final,i.grams,i.cost_kg,i.meters,i.notes);
+  else for(const [lotId,grams] of grouped){const l=one('SELECT * FROM lots WHERE id=?',lotId);run('INSERT INTO order_items(order_id,lot_id,grams,cost_kg) VALUES(?,?,?,?)',id,lotId,grams,l.cost_kg);}
+  if(!draft)for(const [lotId,grams] of grouped){
+    if(grams===0)continue;
     const l=one('SELECT * FROM lots WHERE id=?',lotId);
     run('UPDATE lots SET grams=grams-? WHERE id=?',grams,lotId);
     run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,?,?,?,?,?,?)',lotId,'out',grams,l.cost_kg,d,`Orden ${folio}`,id);
   }
 }
+function updateOrder(b){createOrder(b,Number(b.id));}
+
 function cancelOrder(b) {
   const o=one('SELECT * FROM orders WHERE id=?',b.id);
   if(!o) fail('Orden no encontrada.');
@@ -136,6 +176,7 @@ function closeMonth(b) {
   if(month>=today().slice(0,7)) fail('El corte definitivo se realiza después de terminar el mes. Puedes consultar el resumen actual.');
   if(month<one("SELECT value FROM metadata WHERE key='baseline'").value.slice(0,7)) fail('No hay historia registrada para ese mes.');
   if(one('SELECT id FROM cuts WHERE month=?',month)) fail('Ese mes ya tiene un corte.');
+  if(one("SELECT id FROM orders WHERE status='draft' AND substr(date,1,7)<=? LIMIT 1",month))fail('Completa o cancela los registros pendientes antes de cerrar el mes.');
   const rows=all('SELECT l.*,p.name,p.code,p.category FROM lots l JOIN products p ON p.id=l.product_id').map(l=>{
     const ms=all('SELECT * FROM movements WHERE lot_id=? AND date<?',l.id,month+'-32');
     let opening=0,incoming=0,outgoing=0;
@@ -158,7 +199,7 @@ const server=http.createServer(async(req,res)=>{
       if(req.headers.origin && req.headers.origin!==`http://${req.headers.host}` && req.headers.origin!==`https://${req.headers.host}`) fail('Origen no permitido.');
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>100000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
-      const actions={'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true}));return;
     }

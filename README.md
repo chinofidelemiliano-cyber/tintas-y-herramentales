@@ -19,8 +19,16 @@ El servidor escucha en el puerto 3000 (`PORT` permite cambiarlo). `npm run dev` 
 - Ingresos a lotes existentes, lotes nuevos o productos nuevos; alta automática en el catálogo y actualización de existencias en una transacción.
 - Egresos con motivo, fecha y validación de existencia disponible.
 - Catálogo de tintas y herramentales. Los herramentales inician vacíos porque el PDF contiene únicamente tintas y auxiliares.
-- Captura manual de órdenes por mes y año, con varios lotes y gramos consumidos. Confirmar descuenta existencias; cancelar las devuelve una sola vez. El folio es único. La lista inicia en el mes actual de Ciudad de México.
+- Captura manual de órdenes por mes y año, con varios lotes y gramos consumidos. Confirmar descuenta existencias; cancelar las devuelve una sola vez. Un folio puede tener registros en distintas fechas o NP; se rechazan duplicados de orden, fecha y NP. La lista inicia en el mes actual de Ciudad de México.
 - Resumen mensual y exportación PDF. El cierre definitivo se confirma después de terminar el mes, guarda una instantánea por lote y bloquea movimientos de períodos cerrados. No se permite fechar movimientos antes de la carga inicial ni en el futuro.
+
+## Bitácora de producción por pesaje
+
+El formato sigue el PDF de órdenes compartido por el usuario: orden, NP por renglón, fecha, prensista, tinta, lote, ingreso, egreso, gramos totales, metros, notas y producto. En esta hoja, **ingreso es el peso inicial y egreso el peso final o devuelto**; el consumo se calcula como inicial menos final (3,278 − 3,186 = 92 g). No se registran dos movimientos de inventario: al confirmar solo se descuenta la diferencia del lote.
+
+Los registros con peso final faltante pueden guardarse pendientes, sin modificar existencias; se completan y confirman después. Confirmar una segunda vez se rechaza. El peso final no puede superar al inicial; los ajustes o devoluciones se registran por separado. Cancelar un confirmado devuelve solo el consumo descontado, una única vez. Antes de cerrar un mes deben completarse o cancelarse sus registros pendientes.
+
+Se conservan las órdenes y consumos anteriores, aunque no tuvieran pesos o NP. La migración no inventa pesos ni repite descuentos. Los registros del PDF de referencia no se importaron como movimientos históricos, para evitar descontar otra vez datos que pueden estar reflejados en el inventario inicial. La exportación de producción utiliza las mismas columnas de la bitácora.
 
 ## Datos iniciales
 
@@ -28,7 +36,7 @@ El servidor escucha en el puerto 3000 (`PORT` permite cambiarlo). `npm run dev` 
 
 Se conservan dos saldos negativos del documento original, pendientes de revisión: Rojo 200, lote AW0717L (−3,374 g), y Azul 291, lote 1462551 (−646 g). La extracción de códigos y fechas debe revisarse contra el archivo de origen antes de uso operativo.
 
-Las tintas vencidas se identifican en las órdenes. Este piloto permite seleccionarlas; la planta debe decidir su política de autorización. Los ingresos al mismo lote conservan el costo original; usa otro lote para costos diferentes. No hay carga automática de archivos de órdenes ni edición de órdenes confirmadas: cancela y registra una nueva con otro folio.
+Las tintas vencidas se identifican en las órdenes. Este piloto permite seleccionarlas; la planta debe decidir su política de autorización. Los ingresos al mismo lote conservan el costo original; usa otro lote para costos diferentes. No hay carga automática de archivos de órdenes ni edición de órdenes confirmadas: cancela y registra nuevamente el trabajo.
 
 ## Catálogo y garrafones
 
@@ -50,7 +58,7 @@ Los datos de catálogo sugieren la caducidad y el costo al registrar un nuevo lo
 npm test
 ```
 
-Las pruebas usan una base temporal y comprueban importación, altas, salidas, transacciones de órdenes, devolución por cancelación, protección contra folios duplicados, existencia insuficiente, fechas inválidas y cierre mensual. No alteran la base del piloto.
+Las pruebas usan una base temporal y comprueban importación, altas, salidas, transacciones de órdenes, devolución por cancelación, protección contra registros duplicados, existencia insuficiente, fechas inválidas y cierre mensual. No alteran la base del piloto.
 
 ## Alcance
 
