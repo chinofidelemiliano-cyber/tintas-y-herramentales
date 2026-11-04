@@ -22,3 +22,15 @@ test('4kg containers retain balances exactly including partials, empty and negat
  for(const l of seed.filter(l=>l.grams>0)){const cs=splitContainers(l.grams);assert.equal(cs.reduce((s,c)=>s+c.grams,0),l.grams);assert.ok(cs.every(c=>c.grams<=4000&&c.grams>0&&c.estimated))}
  assert.equal(splitContainers(4000.001).reduce((s,c)=>s+c.grams,0),4000.001);
 });
+test('supplier dropdown groups retain every code, lot and balance without a display cap',async()=>{
+ const {groupByProvider}=await import('../public/inventory-model.js');
+ const products=new Map(catalog.map(p=>[p.code,p]));
+ const lots=seed.map(l=>({...l,provider:products.get(canonicalCode(l.code)).provider,code:canonicalCode(l.code)}));
+ const providers=groupByProvider(lots);
+ assert.equal(providers.length,7);
+ assert.equal(providers.flatMap(p=>p.groups).length,65);
+ assert.equal(providers.flatMap(p=>p.lots).length,88);
+ assert.equal(providers.reduce((sum,p)=>sum+p.grams,0),324741);
+ assert.equal(providers.find(p=>p.name==='Graphic').groups.find(g=>g.code==='E3024P01').lots.length,2);
+ assert.equal(groupByProvider([{...lots[0],provider:' Inkolor '},{...lots[1],provider:'inkolor'}]).length,1);
+});

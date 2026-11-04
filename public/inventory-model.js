@@ -27,3 +27,16 @@ export function groupLots(lots) {
   }
   return [...groups.values()];
 }
+
+export function groupByProvider(lots) {
+  const providers = new Map();
+  for (const lot of lots) {
+    const name = String(lot.provider || '').trim() || 'Sin proveedor';
+    const key = name.toLocaleLowerCase('es-MX');
+    if (!providers.has(key)) providers.set(key, { name, lots: [], grams: 0 });
+    const provider = providers.get(key);
+    provider.lots.push(lot);
+    provider.grams += lot.grams;
+  }
+  return [...providers.values()].sort((a, b) => a.name.localeCompare(b.name, 'es-MX')).map(p => ({...p, groups: groupLots(p.lots)}));
+}

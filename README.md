@@ -15,12 +15,12 @@ El servidor escucha en el puerto 3000 (`PORT` permite cambiarlo). `npm run dev` 
 
 ## Funcionalidad del piloto
 
-- Inventario por producto y lote: búsquedas, filtros, estado de caducidad, detalle, exportación CSV y cantidades negativas históricas señaladas.
+- Inventario por producto y lote: búsquedas, filtros, estado de caducidad, detalle, exportación PDF y cantidades negativas históricas señaladas.
 - Ingresos a lotes existentes, lotes nuevos o productos nuevos; alta automática en el catálogo y actualización de existencias en una transacción.
 - Egresos con motivo, fecha y validación de existencia disponible.
 - Catálogo de tintas y herramentales. Los herramentales inician vacíos porque el PDF contiene únicamente tintas y auxiliares.
 - Captura manual de órdenes por mes y año, con varios lotes y gramos consumidos. Confirmar descuenta existencias; cancelar las devuelve una sola vez. El folio es único. La lista inicia en el mes actual de Ciudad de México.
-- Resumen mensual y exportación CSV. El cierre definitivo se confirma después de terminar el mes, guarda una instantánea por lote y bloquea movimientos de períodos cerrados. No se permite fechar movimientos antes de la carga inicial ni en el futuro.
+- Resumen mensual y exportación PDF. El cierre definitivo se confirma después de terminar el mes, guarda una instantánea por lote y bloquea movimientos de períodos cerrados. No se permite fechar movimientos antes de la carga inicial ni en el futuro.
 
 ## Datos iniciales
 
@@ -36,7 +36,11 @@ Las tintas vencidas se identifican en las órdenes. Este piloto permite seleccio
 
 Los códigos se normalizan a mayúsculas. `UIAPP50EP021ID`, extraído originalmente unido a parte del nombre, se corrige a `APP50EP021ID` conforme al nuevo catálogo, conservando su lote y su saldo.
 
-El inventario se muestra por **código → lotes → garrafones de 4 kg**. Cada lote positivo se reparte visualmente en cantidades de 4,000 g y un último sobrante (7,041 g → 4,000 + 3,041 g). Es una **distribución estimada, pendiente de verificación física**, aprobada por el usuario: no son identificadores persistentes de envases ni cantidades medidas individualmente. Al cambiar el saldo del lote, se recalcula el reparto. Los consumos siguen registrándose por lote. Los lotes vacíos no generan garrafones y los negativos conservan una alerta sin crear envases ficticios.
+El inventario se muestra por **proveedor → código → lotes → garrafones de 4 kg**. Cada lote positivo se reparte visualmente en cantidades de 4,000 g y un último sobrante (7,041 g → 4,000 + 3,041 g). Es una **distribución estimada, pendiente de verificación física**, aprobada por el usuario: no son identificadores persistentes de envases ni cantidades medidas individualmente. Al cambiar el saldo del lote, se recalcula el reparto. Los consumos siguen registrándose por lote. Los lotes vacíos no generan garrafones y los negativos conservan una alerta sin crear envases ficticios.
+
+El inventario muestra los 88 lotes actuales sin paginación ni límite por página. Cada proveedor tiene una lista desplegable que conserva los grupos por código y los lotes por separado. Los controles «Expandir todo» y «Contraer todo» cambian la apertura de las listas. Los filtros siguen limitando los resultados cuando el usuario los aplica.
+
+Las exportaciones de inventario, ingresos y egresos, catálogo, órdenes y cortes se descargan directamente como PDF A4 horizontal, con encabezados repetidos y número de página. Incluyen todos los registros que cumplen los filtros activos, aunque las listas estén contraídas o la tabla de otra sección tenga paginación. Los reportes conservan la indicación de vista previa cuando no hay API y marcan el reparto de garrafones como estimado. La generación se hace en el navegador sin dependencias ni servicios externos.
 
 Los datos de catálogo sugieren la caducidad y el costo al registrar un nuevo lote. El costo histórico de un lote existente se conserva. El catálogo muestra productos sin stock; no se inventan existencias a partir de máximos o puntos de recompra.
 
