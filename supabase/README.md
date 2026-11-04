@@ -23,3 +23,7 @@ Para otra persona, crea otro usuario y repite el paso 3 con su correo. Solo los 
 - Los datos iniciales se importan desde los PDF proporcionados. Este archivo no copia automáticamente movimientos nuevos de una base SQLite local. Si se han capturado datos locales adicionales, deben migrarse antes de trabajar en ambos sistemas para evitar inventarios divergentes.
 
 Preparar y publicar estos archivos no ejecuta SQL dentro de la cuenta de Supabase ni crea usuarios. No se debe dar la conexión por validada en producción hasta completar los pasos del panel y comprobar una operación real autenticada.
+
+## Actualizar una base existente: tiempos de preparación
+
+Si ya ejecutaste setup.sql antes de agregar esta sección, ejecuta ahora **preparation-times.sql**, completo, en SQL Editor. Añade la tabla protegida, la función de guardado y la lectura de preparaciones. No requiere volver a importar el inventario ni autorizar de nuevo a los usuarios existentes. La versión actual de setup.sql ya lo incluye para instalaciones nuevas.

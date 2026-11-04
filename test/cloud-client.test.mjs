@@ -11,7 +11,7 @@ test('cloud connector requires login and uses only public configuration plus use
   if(url==='/cloud-config.json')return Response.json({enabled:true,supabaseUrl:'https://testproject.supabase.co',publishableKey:'sb_publishable_test_public_config'});
   if(url.includes('/auth/v1/token'))return Response.json({access_token:'fake-user-access-token',refresh_token:'fake-refresh-token',expires_in:3600,user:{email:'test@example.invalid'}});
   if(url.endsWith('/prisma_state'))return failState?Response.json({code:'PGRST202',message:'missing function'},{status:404}):Response.json({products:[],lots:[]});
-  if(url.endsWith('/prisma_action'))return Response.json({ok:true});
+  if(url.endsWith('/prisma_action')||url.endsWith('/prisma_save_preparation'))return Response.json({ok:true});
   if(url.endsWith('/logout'))return new Response(null,{status:204});
   throw Error('Unexpected URL');
  };
@@ -20,6 +20,7 @@ test('cloud connector requires login and uses only public configuration plus use
  await cloud.signIn('test@example.invalid','fake-test-password');assert.equal(cloud.hasSession(),true);
  assert.deepEqual(await cloud.state(),{products:[],lots:[]});await cloud.action('movements',{grams:10});
  const action=calls.find(c=>c.url.endsWith('/prisma_action'));assert.equal(action.options.headers.Authorization,'Bearer fake-user-access-token');assert.equal(action.options.headers.apikey,'sb_publishable_test_public_config');assert.deepEqual(JSON.parse(action.options.body),{operation:'movements',payload:{grams:10}});
+ await cloud.action('preparations',{folio:'OP-TEST'});const prep=calls.find(c=>c.url.endsWith('/prisma_save_preparation'));assert.deepEqual(JSON.parse(prep.options.body),{payload:{folio:'OP-TEST'}});
  failState=true;await assert.rejects(cloud.state(),/setup.sql/);
  await cloud.signOut();assert.equal(cloud.hasSession(),false);assert.equal(storage.size,0);
 });

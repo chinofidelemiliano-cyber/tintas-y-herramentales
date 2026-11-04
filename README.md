@@ -1,6 +1,6 @@
 # Prisma · Tintas y herramentales
 
-Piloto web para el inventario flexográfico de Identilabel México. Interfaz en español, cantidades de tinta en gramos, herramentales en piezas y costos en MXN.
+Piloto web para el inventario flexográfico de planta. Interfaz en español, cantidades de tinta en gramos, herramentales en piezas y costos en MXN.
 
 ## Ejecutar
 
@@ -86,3 +86,9 @@ PRISMA_PGLITE_MODULE=/tmp/prisma-pg-validation/node_modules/@electric-sql/pglite
 ```
 
 Este script usa una base PostgreSQL temporal: comprueba importación, miembros autorizados, permisos de tablas, pesajes, descuentos, cancelación única, pendientes, cierres e importación idempotente. No se conecta al proyecto real.
+
+## Tiempos de preparación
+
+La sección «Tiempos de preparación» registra fecha, orden, NP, inicio, fin, duración en minutos, fecha y hora solicitadas, insumos/herramental, producto y observaciones. Calcula los minutos automáticamente; si cruza medianoche debe indicarse explícitamente «Termina al día siguiente». Permite editar y exportar todos los resultados del mes y filtros a PDF. No afecta las existencias ni genera movimientos.
+
+SQLite crea la tabla al arrancar. Para una base Supabase ya instalada, ejecuta **supabase/preparation-times.sql** en SQL Editor; la instalación inicial actualizada **supabase/setup.sql** ya incluye esta sección. Ambos archivos conservan las existencias. La actualización verifica que la instalación base exista antes de continuar.

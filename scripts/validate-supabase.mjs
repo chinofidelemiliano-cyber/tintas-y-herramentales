@@ -27,5 +27,14 @@ await db.exec('reset role');await db.exec(sql);await db.exec('set role authentic
 const previous=new Date(s.today+'T12:00:00Z');previous.setUTCDate(1);previous.setUTCMonth(previous.getUTCMonth()-1);const mon=previous.toISOString().slice(0,7),day=mon+'-01';
 await db.exec('reset role');await db.query("update public.prisma_metadata set value=$1 where key='baseline'",[day]);await db.query("update public.prisma_movements set date=$1::date where type='initial'",[day]);await db.exec('set role authenticated');
 await action('movements',{type:'in',lot_id:lot.id,grams:50,date:day,reason:'Compra mes anterior'});await action('cuts',{month:mon});let closed=await state();assert.equal(Number(closed.cuts[0].snapshot.find(r=>r.lot_id===lot.id).closing),lot.grams+50);await assert.rejects(action('movements',{type:'in',lot_id:lot.id,grams:1,date:day,reason:'Mes cerrado'}));console.log('PASS monthly close snapshots correct balances and blocks writes');
-await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(state());console.log('PASS signed-in nonmembers cannot access inventory');
+const savePrep=payload=>db.query('select public.prisma_save_preparation($1::jsonb)',[JSON.stringify(payload)]);
+const beforePrep=await state();
+const preparation={date:s.today,folio:'OP-PREP-PG',np:'330-1',start_time:'06:58',end_time:'07:08',requested_date:s.today,requested_time:'07:30',supplies:'6 rasquetas y 1 suaje',product:'Producto prueba',notes:'Observación'};
+await savePrep(preparation);let prep=(await state()).preparations[0];assert.equal(Number(prep.minutes),10);
+await savePrep({...preparation,id:prep.id,start_time:'23:50',end_time:'00:10',end_next_day:true});assert.equal(Number((await state()).preparations[0].minutes),20);
+await assert.rejects(savePrep({...preparation,start_time:'23:50',end_time:'00:10'}));
+await assert.rejects(db.query('select * from public.prisma_preparations'));
+assert.deepEqual((await state()).lots,beforePrep.lots);assert.equal((await state()).movements.length,beforePrep.movements.length);console.log('PASS preparation times save, edit and preserve inventory');
+await db.exec('reset role');await db.exec(readFileSync(new URL('../supabase/preparation-times.sql',import.meta.url),'utf8'));await db.exec('set role authenticated');assert.equal((await state()).preparations.length,1);console.log('PASS preparation upgrade preserves existing data');
+await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(state());await assert.rejects(savePrep(preparation));console.log('PASS signed-in nonmembers cannot access inventory or preparations');
 await db.close();

@@ -4,6 +4,7 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { canonicalCode } from './public/inventory-model.js';
+import { preparationMinutes } from './public/preparation-model.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 mkdirSync(path.join(root, 'data'), { recursive: true });
@@ -15,6 +16,7 @@ CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY,folio TEXT NOT NULL UNI
 CREATE TABLE IF NOT EXISTS movements(id INTEGER PRIMARY KEY,lot_id INTEGER NOT NULL REFERENCES lots(id),type TEXT NOT NULL,grams REAL NOT NULL,cost_kg REAL NOT NULL,date TEXT NOT NULL,reason TEXT NOT NULL,order_id INTEGER REFERENCES orders(id));
 CREATE TABLE IF NOT EXISTS cuts(id INTEGER PRIMARY KEY,month TEXT NOT NULL UNIQUE,created_at TEXT NOT NULL,snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
+db.exec(`CREATE TABLE IF NOT EXISTS preparations(id INTEGER PRIMARY KEY,date TEXT NOT NULL,folio TEXT NOT NULL,np TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,end_next_day INTEGER NOT NULL DEFAULT 0,minutes REAL NOT NULL,requested_date TEXT,requested_time TEXT,supplies TEXT NOT NULL,product TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '');`);
 for (const [column, definition] of Object.entries({maximum:'REAL NOT NULL DEFAULT 0',shelf_days:'INTEGER NOT NULL DEFAULT 365',cost_kg:'REAL NOT NULL DEFAULT 0',container_grams:'REAL NOT NULL DEFAULT 4000'})) {
   if (!db.prepare('PRAGMA table_info(products)').all().some(c => c.name === column)) db.exec(`ALTER TABLE products ADD COLUMN ${column} ${definition}`);
 }
@@ -77,12 +79,26 @@ if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
  });}finally{db.exec('PRAGMA foreign_keys=ON');}
 }
 function state() {
-  return {today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
+  return {preparations:all('SELECT * FROM preparations ORDER BY date DESC,start_time DESC,id DESC'),today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
     products:all('SELECT * FROM products ORDER BY name'),
     lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
     orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
+}
+function savePreparation(b){
+ const validDate=value=>{
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(value||'')||!Number.isFinite(Date.parse(value))||new Date(value).toISOString().slice(0,10)!==value)fail('Fecha no válida.');
+  return value;
+ };
+ const d=validDate(b.date);if(d>today())fail('No se permiten registros de preparación con fecha futura.');
+ const next=b.end_next_day===true||b.end_next_day===1||b.end_next_day==='true';
+ const minutes=preparationMinutes(b.start_time,b.end_time,next);
+ const requested=b.requested_date?validDate(b.requested_date):null;
+ if(b.requested_time)preparationMinutes(b.requested_time,b.requested_time);
+ const values=[d,required(b.folio,'la orden'),required(b.np,'el NP'),b.start_time,b.end_time,next?1:0,minutes,requested,b.requested_time||null,required(b.supplies,'los insumos / herramentales'),required(b.product,'el producto'),String(b.notes||'')];
+ if(b.id){if(!one('SELECT id FROM preparations WHERE id=?',b.id))fail('Registro de preparación no encontrado.');run('UPDATE preparations SET date=?,folio=?,np=?,start_time=?,end_time=?,end_next_day=?,minutes=?,requested_date=?,requested_time=?,supplies=?,product=?,notes=? WHERE id=?',...values,b.id);}
+ else run('INSERT INTO preparations(date,folio,np,start_time,end_time,end_next_day,minutes,requested_date,requested_time,supplies,product,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',...values);
 }
 function product(b) {
   const code=canonicalCode(required(b.code,'el código'));
@@ -199,7 +215,7 @@ const server=http.createServer(async(req,res)=>{
       if(req.headers.origin && req.headers.origin!==`http://${req.headers.host}` && req.headers.origin!==`https://${req.headers.host}`) fail('Origen no permitido.');
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>100000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
-      const actions={'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true}));return;
     }

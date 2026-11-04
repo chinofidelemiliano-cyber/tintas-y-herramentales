@@ -60,3 +60,11 @@ test('repeated order numbers allow another NP but reject duplicate runs and inva
  for(const line of [{...body.lines[0],np:'BAD-1',final_grams:101},{...body.lines[0],np:'BAD-2',final_grams:''}])await post('orders',{...body,lines:[line]},400);
  assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,before-10);
 });
+test('preparation log saves and edits time records without changing stock or movements',async()=>{
+ const s=await get(),balance=s.lots.map(l=>[l.id,l.grams]),count=s.movements.length;
+ const body={date:s.today,folio:'OP-PREP-1',np:'330-1',start_time:'06:58',end_time:'07:08',requested_date:s.today,requested_time:'07:30',supplies:'6 rasquetas, 6 charolas, 6 tintas y 1 suaje',product:'Producto piloto',notes:'Preparación sin consumos'};
+ await post('preparations',body);let current=await get(),row=current.preparations.find(p=>p.folio===body.folio);assert.equal(row.minutes,10);assert.equal(row.requested_time,'07:30');
+ await post('preparations',{...body,id:row.id,start_time:'23:50',end_time:'00:10',end_next_day:true});current=await get();assert.equal(current.preparations.find(p=>p.id===row.id).minutes,20);
+ await post('preparations',{...body,start_time:'23:50',end_time:'00:10'},400);await post('preparations',{...body,start_time:'24:00'},400);
+ assert.deepEqual(current.lots.map(l=>[l.id,l.grams]),balance);assert.equal(current.movements.length,count);assert.equal((await get()).preparations.length,current.preparations.length);
+});
