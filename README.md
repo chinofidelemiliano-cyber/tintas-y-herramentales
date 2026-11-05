@@ -210,3 +210,7 @@ La consulta mensual requiere además usuario y contraseña compartidos, validado
 ## Hora para el sitio y los PDF
 
 Detección de zona del dispositivo, zona personalizada y formato de 12/24 horas desde Configuración. Se guarda por perfil y el administrador publica la zona para las páginas compartidas. Activación: [configurar hora](docs/configurar-hora.md), con `supabase/time-settings.sql` como última migración.
+
+## Recuperación de incidencias
+
+Fotos y datos con respaldo local por perfil, sincronización automática y cronómetro fijo entre secciones y en la pestaña. El NP de una orden pendiente se valida aunque no tenga consumos. Actualización en Supabase: `supabase/incident-recovery.sql`. Instrucciones: [recuperación de incidencias](docs/recuperacion-incidencias.md).

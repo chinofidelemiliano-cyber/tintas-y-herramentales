@@ -214,7 +214,7 @@ function startIncident(b){
  if(old){if(old.order_id!==Number(b.order_id))fail('Esta captura ya está vinculada a otra orden.');return {id:old.id,folio:incidentFolio(old.incident_number),started_at:old.started_at};}
  const o=one('SELECT * FROM orders WHERE id=?',Number(b.order_id));if(!o)fail('Selecciona una orden registrada.');
  const n=one('SELECT coalesce(max(incident_number),10)+1 AS n FROM incidents').n,started=new Date().toISOString();
- const nps=all("SELECT DISTINCT np FROM order_items WHERE order_id=? AND np<>''",o.id),np=nps.length===1?nps[0].np:'';
+ const nps=[...new Set([o.np,...all("SELECT DISTINCT np FROM order_items WHERE order_id=? AND np<>''",o.id).map(row=>row.np)].filter(Boolean).map(value=>value.trim()))],np=b.np?String(b.np).trim():(nps.length===1?nps[0]:'');if(np&&!nps.includes(np))fail('El NP no pertenece a esa orden.');
  const result=run("INSERT INTO incidents(incident_number,date,order_id,order_ref,np,machine,description,responsible,impact,status,request_key,timer_mode,started_at) VALUES(?,?,?,?,?,'','Registro en curso','','','Abierta',?,1,?)",n,today(),o.id,o.folio,np,b.request_key?String(b.request_key):null,started);
  return {id:Number(result.lastInsertRowid),folio:incidentFolio(n),started_at:started};
 }
@@ -224,7 +224,7 @@ function saveTimedIncident(b,old){
  const merged={...old,...b};for(const key of ['before_photo','after_photo']){merged[key]=Object.hasOwn(b,key)?b[key]:old[key];if(merged[key])jpegPhoto(merged[key]);}
  if(finish&&(!merged.before_photo||!merged.after_photo))fail('Agrega la foto del defecto y la foto final para generar el formato.');
  for(const [key,allowed] of [['machine',incidentMachines],['responsible',incidentOwners],['impact',incidentImpacts]])if(merged[key]&&!allowed.includes(merged[key]))fail('Opción no válida para '+key+'.');
- const np=String(merged.np||'');if(np&&!one('SELECT id FROM order_items WHERE order_id=? AND np=?',old.order_id,np))fail('El NP no pertenece a esa orden.');
+ const np=String(merged.np||'').trim();if(np&&!one("SELECT id FROM orders WHERE id=? AND trim(np)=? UNION SELECT order_id AS id FROM order_items WHERE order_id=? AND trim(np)=?",old.order_id,np,old.order_id,np))fail('El NP no pertenece a esa orden.');
  const ended=old.ended_at||(finish?new Date().toISOString():null);
  run('UPDATE incidents SET np=?,machine=?,description=?,responsible=?,action=?,impact=?,status=?,prepared_by=?,color_observed=?,test_result=?,validation_notes=?,before_photo=?,after_photo=?,ended_at=? WHERE id=?',np,String(merged.machine||''),String(merged.description||'Defecto documentado en fotografía inicial.'),String(merged.responsible||''),String(merged.action||(finish?'Corrección documentada en fotografía final.':'')),String(merged.impact||''),finish?'Cerrada':'Abierta',String(merged.prepared_by||''),String(merged.color_observed||''),String(merged.test_result||''),String(merged.validation_notes||''),merged.before_photo||null,merged.after_photo||null,ended,old.id);
  return {id:old.id,folio:incidentFolio(old.incident_number),started_at:old.started_at,ended_at:ended};
@@ -235,7 +235,7 @@ function saveIncident(b){
  const d=b.date;
  if(!/^\d{4}-\d{2}-\d{2}$/.test(d||'')||!Number.isFinite(Date.parse(d))||new Date(d).toISOString().slice(0,10)!==d||d>today())fail('Fecha de incidencia no válida.');
  const o=one('SELECT * FROM orders WHERE id=?',Number(b.order_id));if(!o)fail('Selecciona una orden de producción registrada.');
- const np=String(b.np||'');if(np&&!one('SELECT id FROM order_items WHERE order_id=? AND np=?',o.id,np))fail('El NP no pertenece a esa orden.');
+ const np=String(b.np||'').trim();if(np&&!one("SELECT id FROM orders WHERE id=? AND trim(np)=? UNION SELECT order_id AS id FROM order_items WHERE order_id=? AND trim(np)=?",o.id,np,o.id,np))fail('El NP no pertenece a esa orden.');
  for(const [key,allowed] of [['machine',incidentMachines],['responsible',incidentOwners],['impact',incidentImpacts],['status',incidentStatuses]])if(!allowed.includes(b[key]))fail('Selecciona una opción válida para '+key+'.');
  const description=required(b.description,'la descripción de la incidencia'),action=String(b.action||'');if(b.status==='Cerrada'&&!action.trim())fail('Captura la acción realizada antes de cerrar la incidencia.');
  const values=[d,o.id,o.folio,np,b.machine,description,b.responsible,action,b.impact,b.status,String(b.prepared_by||''),String(b.color_observed||''),String(b.test_result||''),String(b.validation_notes||'')];

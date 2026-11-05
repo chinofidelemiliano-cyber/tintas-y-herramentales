@@ -1,0 +1,10 @@
+// Local recovery is scoped to the authenticated profile, and never included in public reports.
+let database;const writes=new Map(),uploads=new Map();
+const key=(owner,id)=>owner+':'+id;
+function db(){if(!database)database=new Promise((resolve,reject)=>{if(!globalThis.indexedDB){reject(Error('No se pudo activar el respaldo local. Mantén la página abierta hasta confirmar el guardado en línea.'));return;}const request=indexedDB.open('inventory-incident-drafts-v1',1);request.onupgradeneeded=()=>request.result.createObjectStore('drafts');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});return database;}
+async function transaction(mode,work){const connection=await db();return new Promise((resolve,reject)=>{const tx=connection.transaction('drafts',mode);let result;tx.oncomplete=()=>resolve(result);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||Error('No se pudo guardar el respaldo.'));work(tx.objectStore('drafts'),value=>result=value);});}
+function localQueue(k,work){const promise=(writes.get(k)||Promise.resolve()).catch(()=>{}).then(work);writes.set(k,promise);promise.finally(()=>{if(writes.get(k)===promise)writes.delete(k);}).catch(()=>{});return promise;}
+export async function readIncidentDraft(owner,id){const k=key(owner,id);await writes.get(k)?.catch(()=>{});return transaction('readonly',(store,done)=>{const request=store.get(k);request.onsuccess=()=>done(request.result||null);});}
+export function writeIncidentDraft(owner,id,draft){const k=key(owner,id);return localQueue(k,()=>transaction('readwrite',store=>store.put(draft,k)));}
+export function clearIncidentDraft(owner,id,revision){const k=key(owner,id);return localQueue(k,()=>transaction('readwrite',store=>{const request=store.get(k);request.onsuccess=()=>{if(request.result?.revision===revision)store.delete(k);};}));}
+export function queueIncidentUpload(owner,id,work){const k=key(owner,id),promise=(uploads.get(k)||Promise.resolve()).catch(()=>{}).then(work);uploads.set(k,promise);promise.finally(()=>{if(uploads.get(k)===promise)uploads.delete(k);}).catch(()=>{});return promise;}
