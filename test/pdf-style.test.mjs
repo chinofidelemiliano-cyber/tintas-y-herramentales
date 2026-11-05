@@ -19,3 +19,13 @@ test('custom colors, typography and optional report contents render without losi
  const record={folio:'INC-0011',date:'2026-11-04',order_ref:'OP-1',machine:'Comco 2',responsible:'Producción',description:'Incidencia',action:'Corregida',impact:'Paro',status:'Cerrada'};
  const incident=Buffer.from(createIncidentPDF(record,{siteName:'Mi inventario',pdfStyle:{fontFamily:'serif',headerColor:'#ff0000'}})).toString('latin1');assert.ok(!incident.includes('Mi inventario'));assert.ok(incident.includes('/BaseFont /Times-Roman'));assert.ok(incident.includes('1.0000 0.0000 0.0000 rg'));
 });
+
+test('white or low-contrast saved text stays readable on printed reports',async()=>{
+ const {readablePDFStyle}=await import('../public/pdf-style.js');const style=readablePDFStyle({textColor:'#ffffff',titleColor:'#ffffff',headerColor:'#ffffff',headerTextColor:'#ffffff',stripeColor:'#111111'});
+ assert.equal(style.textColor,'#111111');assert.equal(style.titleColor,'#111111');assert.equal(style.headerTextColor,'#111111');assert.equal(style.stripeColor,'#f5f5f5');
+ const pdf=Buffer.from(createTablePDF({title:'Inventario',columns:[{label:'Código',width:778}],rows:[['LOTE-VISIBLE']],pdfStyle:{textColor:'#ffffff'}})).toString('latin1');assert.match(pdf,/0\.0667 0\.0667 0\.0667 rg[^\n]*\(LOTE-VISIBLE\) Tj/);
+});
+test('incident comparison automatically uses saved defect and corrective action',()=>{
+ const pdf=Buffer.from(createIncidentPDF({folio:'INC-0011',date:'2026-11-05',order_ref:'OP-107',np:'332',machine:'Comco 2',prepared_by:'Emiliano',responsible:'Producción',description:'Mancha visible',action:'Cambio de placa',impact:'Paro',status:'Cerrada'})).toString('latin1');
+ assert.equal((pdf.match(/\(Mancha visible\) Tj/g)||[]).length,2);assert.equal((pdf.match(/\(Cambio de placa\) Tj/g)||[]).length,2);assert.ok(pdf.includes('(Emiliano)'));assert.ok(pdf.includes('/Count 2'));
+});

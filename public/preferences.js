@@ -1,11 +1,11 @@
 import {defaultPDFStyle,normalizePDFStyle} from './pdf-style.js';
 import {jpegPhoto} from './incident-photos.js';
 const key='inventory-display-preferences-v1';
-export const defaults=Object.freeze({language:'es',theme:'light',accent:'green',siteName:'Mi inventario',dateFormat:'short',density:'comfortable',expandInventory:true,reportLogo:null,pdfStyle:defaultPDFStyle});
+export const defaults=Object.freeze({language:'es',theme:'light',accent:'green',reportName:'',siteName:'Mi inventario',dateFormat:'short',density:'comfortable',expandInventory:true,reportLogo:null,pdfStyle:defaultPDFStyle});
 export function normalizePreferences(value={}){
  let reportLogo=null;if(typeof value?.reportLogo==='string'){try{jpegPhoto(value.reportLogo);reportLogo=value.reportLogo;}catch{}}
  const choose=(field,allowed)=>allowed.includes(value?.[field])?value[field]:defaults[field];
- return {reportLogo,pdfStyle:normalizePDFStyle(value?.pdfStyle),language:choose('language',['es','en']),theme:choose('theme',['light','dark','system']),accent:choose('accent',['green','blue','purple']),siteName:typeof value?.siteName==='string'&&value.siteName.trim()?value.siteName.replace(/[\x00-\x1f]/g,'').trim().slice(0,40):defaults.siteName,dateFormat:choose('dateFormat',['short','dmy','mdy','iso']),density:choose('density',['comfortable','compact']),expandInventory:typeof value?.expandInventory==='boolean'?value.expandInventory:defaults.expandInventory};
+ return {reportName:typeof value?.reportName==='string'?value.reportName.replace(/[\x00-\x1f]/g,'').trim().slice(0,100):'',reportLogo,pdfStyle:normalizePDFStyle(value?.pdfStyle),language:choose('language',['es','en']),theme:choose('theme',['light','dark','system']),accent:choose('accent',['green','blue','purple']),siteName:typeof value?.siteName==='string'&&value.siteName.trim()?value.siteName.replace(/[\x00-\x1f]/g,'').trim().slice(0,40):defaults.siteName,dateFormat:choose('dateFormat',['short','dmy','mdy','iso']),density:choose('density',['comfortable','compact']),expandInventory:typeof value?.expandInventory==='boolean'?value.expandInventory:defaults.expandInventory};
 }
 export function readPreferences(userId){try{return normalizePreferences(JSON.parse(localStorage.getItem(userId?key+':'+userId:key)||'{}'));}catch{return {...defaults};}}
 export function savePreferences(value,userId){const result=normalizePreferences(value);rememberLoginAppearance(result);localStorage.setItem(userId?key+':'+userId:key,JSON.stringify(result));return result;}

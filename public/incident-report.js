@@ -1,8 +1,8 @@
-import {normalizePDFStyle,mmToPoints,pdfColor,logoLayout} from './pdf-style.js';
+import {readablePDFStyle,mmToPoints,pdfColor,logoLayout} from './pdf-style.js';
 import {jpegPhoto,incidentSeconds,incidentClock} from './incident-photos.js';
 import {assemblePDF,wrapPDFText,pdfLiteral} from './pdf-report.js';
 export function createIncidentPDF(record,{dateLabel=record.date,language='es',logo=null,pdfStyle={}}={}){
- const style=normalizePDFStyle(pdfStyle),fontScale=style.fontSize/8;
+ const style=readablePDFStyle(pdfStyle),fontScale=style.fontSize/8;
  const images=[];const logoImage=logo?{...jpegPhoto(logo),name:'ReportLogo'}:null;if(logoImage)images.push(logoImage);const layout=logoLayout(logoImage,595,style),headerShift=layout?Math.max(0,layout.y+layout.height+mmToPoints(style.logoGap)+style.titleSize-35):0,photoShrink=layout?headerShift+10:0;let firstPage=true;
  for(const [key,name] of [['before_photo','Before'],['after_photo','After']])if(record[key])images.push({...jpegPhoto(record[key]),name});
  const W=595,H=842,M=mmToPoints(style.margin),C=W-M*2,en=language==='en',pages=[];let stream='';
@@ -30,7 +30,7 @@ export function createIncidentPDF(record,{dateLabel=record.date,language='es',lo
   stream+=`q ${w} 0 0 ${h} ${x} ${H-y-h} cm /${name} Do Q\n`;
  }
  text(M,510,tr('2. Comparación y validación','2. Comparison and validation'),10,true);
- const comparison=[[tr('Color observado','Observed color'),record.color_observed],[tr('Resultado de la prueba','Test result'),record.test_result],[tr('Observaciones','Notes'),record.validation_notes]];
+ const comparison=[[record.color_observed?tr('Color observado','Observed color'):tr('Incidencia / defecto','Incident / defect'),record.color_observed||record.description],[record.test_result?tr('Resultado de la prueba','Test result'):tr('Acción / corrección','Action / correction'),record.test_result||record.action],[tr('Observaciones','Notes'),record.validation_notes||[record.impact,record.status].filter(Boolean).join(' · ')]];
  comparison.forEach(([label,value],i)=>{const y=522+i*47;box(M,y,165,47,style.striped&&i%2===0?style.stripeColor:false);box(M+165,y,C-165,47,style.striped&&i%2===0?style.stripeColor:false);text(M+6,y+16,label,8,true);fitted(M+171,y+14,value||'',C-177,3);});
  text(M,690,tr('3. Firmas de validación','3. Validation signatures'),10,true);
  [tr('Preprensa','Prepress'),tr('Calidad','Quality'),tr('Encargado de producción','Production manager')].forEach((label,i)=>{const w=C/3;box(M+i*w,703,w,20,true);box(M+i*w,723,w,57);text(M+i*w+6,716,label,8,false,style.headerTextColor);});

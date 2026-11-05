@@ -1,4 +1,4 @@
-import {normalizePDFStyle,mmToPoints,pdfColor,logoLayout} from './pdf-style.js';
+import {readablePDFStyle,mmToPoints,pdfColor,logoLayout} from './pdf-style.js';
 import {jpegPhoto} from './incident-photos.js';
 // Dependency-free, paginated PDF table writer for browser and Node.
 // Built-in Helvetica uses WinAnsi, including Spanish accents.
@@ -34,7 +34,7 @@ function wrap(value, maxWidth, size, fontFamily='sans') {
 }
 
 export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary='',sections=[],language='es',logo=null,pdfStyle={}}) {
- const style=normalizePDFStyle(pdfStyle),logoImage=logo?{...jpegPhoto(logo),name:'ReportLogo'}:null;
+ const style=readablePDFStyle(pdfStyle),logoImage=logo?{...jpegPhoto(logo),name:'ReportLogo'}:null;
  const W=842,H=595,margin=mmToPoints(style.margin),bottom=H-margin-16,size=style.fontSize,lineHeight=size+3,padding={compact:6,normal:10,relaxed:15}[style.rowSpacing],available=W-2*margin;
  const layout=logoLayout(logoImage,W,style),reports=[{title,columns,rows,summary},...sections];
  const textColor=pdfColor(style.textColor),headerColor=pdfColor(style.headerColor),headerText=pdfColor(style.headerTextColor),titleColor=pdfColor(style.titleColor),lineColor=pdfColor(style.lineColor);

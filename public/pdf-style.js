@@ -12,3 +12,15 @@ export function logoLayout(image,pageWidth,style,maxHeight=100){
  if(!image)return null;const margin=mmToPoints(style.margin),scale=Math.min(mmToPoints(style.logoWidth)/image.width,(pageWidth-2*margin)/image.width,maxHeight/image.height),width=image.width*scale,height=image.height*scale;
  return {width,height,x:style.logoAlign==='left'?margin:style.logoAlign==='right'?pageWidth-margin-width:(pageWidth-width)/2,y:margin};
 }
+
+// Reports always print on white paper, independent of the application's theme.
+const luminance=hex=>hex.slice(1).match(/../g).map(c=>parseInt(c,16)/255).map(c=>c<=.04045?c/12.92:((c+.055)/1.055)**2.4).reduce((sum,c,i)=>sum+c*[.2126,.7152,.0722][i],0);
+export function readablePDFStyle(value){
+ const style=normalizePDFStyle(value),contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+ const best=bg=>contrast('#111111',bg)>=contrast('#ffffff',bg)?'#111111':'#ffffff';
+ if(contrast(style.titleColor,'#ffffff')<4.5)style.titleColor='#111111';
+ if(contrast(style.textColor,'#ffffff')<4.5)style.textColor='#111111';
+ if(style.striped&&contrast(style.textColor,style.stripeColor)<4.5)style.stripeColor='#f5f5f5';
+ if(contrast(style.headerTextColor,style.headerColor)<4.5)style.headerTextColor=best(style.headerColor);
+ return style;
+}
