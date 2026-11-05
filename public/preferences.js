@@ -8,7 +8,7 @@ export function normalizePreferences(value={}){
  return {reportLogo,pdfStyle:normalizePDFStyle(value?.pdfStyle),language:choose('language',['es','en']),theme:choose('theme',['light','dark','system']),accent:choose('accent',['green','blue','purple']),siteName:typeof value?.siteName==='string'&&value.siteName.trim()?value.siteName.replace(/[\x00-\x1f]/g,'').trim().slice(0,40):defaults.siteName,dateFormat:choose('dateFormat',['short','dmy','mdy','iso']),density:choose('density',['comfortable','compact']),expandInventory:typeof value?.expandInventory==='boolean'?value.expandInventory:defaults.expandInventory};
 }
 export function readPreferences(userId){try{return normalizePreferences(JSON.parse(localStorage.getItem(userId?key+':'+userId:key)||'{}'));}catch{return {...defaults};}}
-export function savePreferences(value,userId){const result=normalizePreferences(value);localStorage.setItem(userId?key+':'+userId:key,JSON.stringify(result));return result;}
+export function savePreferences(value,userId){const result=normalizePreferences(value);rememberLoginAppearance(result);localStorage.setItem(userId?key+':'+userId:key,JSON.stringify(result));return result;}
 export function formatDisplayDate(value,preferences){
  const date=new Date(value+'T12:00:00');
  if(!Number.isFinite(date.getTime()))return value;
@@ -20,11 +20,11 @@ export function formatDisplayDate(value,preferences){
 
 // Import the old browser settings into only the first profile used on this device.
 export function initialProfilePreferences(userId){
- try{const cached=localStorage.getItem(key+':'+userId);if(cached)return normalizePreferences(JSON.parse(cached));const owner=localStorage.getItem(key+':imported-by');if(!owner||owner===userId)return readPreferences();}catch{}
- return normalizePreferences();
+ try{const cached=localStorage.getItem(key+':'+userId);if(cached)return normalizePreferences(JSON.parse(cached));const owner=localStorage.getItem(key+':imported-by');if(!owner||owner===userId)return readLoginPreferences();}catch{}
+ const appearance=readLoginPreferences();return normalizePreferences({theme:appearance.theme,language:appearance.language,accent:appearance.accent});
 }
 export function cacheProfilePreferences(value,userId){
- const result=normalizePreferences(value);
+ const result=normalizePreferences(value);rememberLoginAppearance(result);
  try{savePreferences(result,userId);localStorage.setItem(key+':imported-by',userId);}catch{}
  return result;
 }
@@ -34,3 +34,7 @@ export async function loadProfilePreferences(cloud){
  const imported=await cloud.savePreferences(initialProfilePreferences(cloud.userId()),true);
  return cacheProfilePreferences(imported,cloud.userId());
 }
+
+const appearanceKey='inventory-login-appearance-v1';
+export function rememberLoginAppearance(value){const normalized=normalizePreferences(value);try{localStorage.setItem(appearanceKey,JSON.stringify({theme:normalized.theme,language:normalized.language,accent:normalized.accent}));}catch{}}
+export function readLoginPreferences(){const base=readPreferences();try{const saved=JSON.parse(localStorage.getItem(appearanceKey)||'null');if(saved)return normalizePreferences({...base,theme:saved.theme,language:saved.language,accent:saved.accent});}catch{}return base;}
