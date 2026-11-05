@@ -138,3 +138,7 @@ La vista previa responde a los controles antes de guardar; «Descargar PDF de pr
 El cronómetro comienza únicamente con **Iniciar incidencia**, después de elegir la orden. Los cronómetros ya iniciados conservan su hora original al reanudarlos. Este cambio de interfaz no necesita SQL.
 
 El PDF individual tiene dos páginas: evidencia/comparación/firmas y detalle completo. La segunda hoja utiliza una tabla compacta; para textos extensos adapta la distribución a dos columnas y reduce la letra si hace falta. No genera una tercera hoja ni descarta campos. Si un texto excepcional no cabe ni en el formato más compacto, informa el límite y solicita resumirlo en vez de truncarlo silenciosamente.
+
+### Configuración de perfil sincronizada
+
+Para una base existente, ejecutar **todo** `supabase/profile-preferences.sql` en SQL Editor (no modifica inventario ni usuarios). `setup.sql` ya lo incluye para instalaciones nuevas. Idioma, apariencia, nombre, fechas, logo y diseño PDF se guardan por `auth.uid()`; las tablas no tienen acceso directo y las funciones verifican membresía. Al entrar se recupera el perfil remoto. Si aún no existe, se importan los ajustes anteriores del navegador solo al primer perfil usado en ese dispositivo. La carga inicial no sobrescribe un perfil creado simultáneamente en otro dispositivo. Guardar/restablecer requiere confirmación del servidor y muestra el error si falla. La última configuración guardada prevalece; otros dispositivos la recuperan al iniciar sesión o recargar. Sin conexión de nube se mantiene el modo local anterior.
