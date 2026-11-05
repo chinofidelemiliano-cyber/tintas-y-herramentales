@@ -25,7 +25,7 @@ test('upgrading existing orders preserves balances, links and historical consump
   try{
    await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('Startup timeout')),10000);server.stdout.on('data',d=>{if(String(d).includes('Inventario listo')){clearTimeout(timeout);resolve()}});server.once('exit',code=>{clearTimeout(timeout);reject(Error('Startup failed '+code))});});
    const s=await(await fetch(`http://127.0.0.1:${port}/api/state`)).json();
-   assert.equal(s.lots.length,1);assert.equal(s.lots[0].grams,900);assert.equal(s.movements.length,2);assert.equal(s.orders[0].id,7);assert.equal(s.orders[0].folio,'OP-LEGACY');assert.equal(s.orders[0].lines.length,1);assert.equal(s.orders[0].lines[0].grams,100);assert.equal(s.orders[0].lines[0].initial_grams,null);
+   assert.equal(s.lots.filter(l=>l.category==='tinta').length,1);assert.equal(s.lots.find(l=>l.id===1).grams,900);assert.equal(s.movements.filter(m=>m.lot_id===1).length,2);assert.equal(s.lots.filter(l=>l.category==='herramental').length,154);assert.equal(s.movements.filter(m=>m.reason.startsWith('Alta de herramental')).length,154);assert.equal(s.orders[0].id,7);assert.equal(s.orders[0].folio,'OP-LEGACY');assert.equal(s.orders[0].lines.length,1);assert.equal(s.orders[0].lines[0].grams,100);assert.equal(s.orders[0].lines[0].initial_grams,null);
   }finally{if(server.exitCode===null){const ended=new Promise(r=>server.once('exit',r));server.kill();await ended;}}
  }
  const check=new DatabaseSync(dbPath);assert.deepEqual(check.prepare('PRAGMA foreign_key_check').all(),[]);check.close();
