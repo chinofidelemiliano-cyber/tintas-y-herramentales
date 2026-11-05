@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {normalizePortalOrder} from './public/order-portal-model.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {parseTeamsOrders} from './netlify/lib/teams-parser.mjs';
 import { DatabaseSync } from 'node:sqlite';
@@ -97,6 +98,32 @@ if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
 }
 for(const [column,type] of Object.entries({started_at:'TEXT',ended_at:'TEXT',np:"TEXT NOT NULL DEFAULT ''",source:"TEXT NOT NULL DEFAULT 'manual'",received_at:'TEXT',scheduled_date:'TEXT',scheduled_start:'TEXT',scheduled_end:'TEXT',pieces:'REAL',planned_meters:'REAL',specifications:"TEXT NOT NULL DEFAULT '{}'"}))if(!all('PRAGMA table_info(orders)').some(c=>c.name===column))db.exec(`ALTER TABLE orders ADD COLUMN ${column} ${type}`);
 db.exec(`CREATE TABLE IF NOT EXISTS teams_connection(id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS teams_receipts(conversation_id TEXT NOT NULL,message_id TEXT NOT NULL,order_ids TEXT NOT NULL,PRIMARY KEY(conversation_id,message_id));`);
+for(const [column,type] of Object.entries({machine:"TEXT NOT NULL DEFAULT ''",queue_number:'INTEGER'}))if(!all('PRAGMA table_info(orders)').some(c=>c.name===column))db.exec(`ALTER TABLE orders ADD COLUMN ${column} ${type}`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS order_queue_number ON orders(queue_number) WHERE queue_number IS NOT NULL;CREATE TABLE IF NOT EXISTS order_portal_access(id INTEGER PRIMARY KEY,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS order_portal_submissions(request_key TEXT PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),payload_hash TEXT NOT NULL);`);
+function manageOrderPortal(b){
+ let access_key=null;
+ if(b.operation==='configure'){access_key='op_'+randomBytes(32).toString('hex');run('INSERT INTO order_portal_access VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,enabled=1',hashToken(access_key));}
+ else if(b.operation==='disable')run('UPDATE order_portal_access SET enabled=0 WHERE id=1');
+ else if(b.operation!=='status')fail('Acción no válida.');
+ return {enabled:!!one('SELECT enabled FROM order_portal_access WHERE id=1')?.enabled,access_key};
+}
+function orderPortal(b){
+ if(typeof b.access_key!=='string'||!/^op_[a-f0-9]{64}$/.test(b.access_key)||!one('SELECT id FROM order_portal_access WHERE id=1 AND enabled=1 AND token_hash=?',hashToken(b.access_key)))fail('El enlace fue desactivado o cambió. Solicita el enlace vigente.');
+ const payload=b.payload||{};
+ if(payload.operation==='list'){
+  const cursor=Number(payload.after_sequence||0);if(!Number.isSafeInteger(cursor)||cursor<0)fail('Secuencia no válida.');
+  const rows=all("SELECT id,queue_number,folio,np,product,client,pressman,machine,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes,status,started_at,ended_at,received_at FROM orders WHERE source='portal' AND queue_number>? AND (?=1 OR (status<>'cancelled' AND ended_at IS NULL)) ORDER BY queue_number LIMIT 51",cursor,payload.include_finished===true?1:0).map(({specifications,...o})=>({...o,colors:JSON.parse(specifications).colores||''}));
+  return {orders:rows.slice(0,50),has_more:rows.length>50};
+ }
+ if(payload.operation!=='submit')fail('Acción no permitida.');
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.request_key||''))fail('Falta la referencia de captura.');
+ const item=normalizePortalOrder(payload.order),signature=hashToken(JSON.stringify(item)),old=one('SELECT * FROM order_portal_submissions WHERE request_key=?',payload.request_key);
+ if(old){if(old.payload_hash!==signature)fail('La captura ya fue enviada con otros datos. Recarga la lista antes de crear otra.');return {id:old.order_id,queue_number:one('SELECT queue_number FROM orders WHERE id=?',old.order_id).queue_number,duplicate:true};}
+ if(one("SELECT id FROM orders WHERE source='portal' AND status<>'cancelled' AND upper(trim(folio))=upper(?) AND np=? AND scheduled_date=?",item.folio,item.np,item.scheduled_date))fail('Esta orden y NP ya están registrados para esa fecha. Revisa la lista.');
+ const n=one('SELECT coalesce(max(queue_number),0)+1 AS n FROM orders').n;
+ const id=Number(run("INSERT INTO orders(folio,np,product,client,pressman,machine,date,status,source,received_at,queue_number,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes) VALUES(?,?,?,?,?,?,?,'draft','portal',?,?,?,?,?,?,?,?,?)",item.folio,item.np,item.product,item.client,item.pressman,item.machine,today(),new Date().toISOString(),n,item.scheduled_date,item.scheduled_start,item.scheduled_end||null,item.pieces,item.meters,JSON.stringify({colores:item.colors}),item.notes).lastInsertRowid);
+ run('INSERT INTO order_portal_submissions VALUES(?,?,?)',payload.request_key,id,signature);return {id,queue_number:n,duplicate:false};
+}
 const hashToken=token=>createHash('sha256').update(token).digest('hex');
 function orderClock(b){
  const row=one('SELECT * FROM orders WHERE id=?',Number(b.id));if(!row||row.status==='cancelled')fail('Orden no encontrada o cancelada.');
@@ -301,7 +328,7 @@ const server=http.createServer(async(req,res)=>{
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>1000000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
       if(url.pathname==='/api/teams-orders'){const result=tx(()=>receiveTeams(b,req.headers['x-integration-key']));res.end(JSON.stringify({ok:true,...result}));return;}
-      const actions={'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/order-portal':orderPortal,'/api/order-portal/manage':manageOrderPortal,'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       const result=tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true,...(result||{})}));return;
     }
