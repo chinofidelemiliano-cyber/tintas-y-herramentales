@@ -23,10 +23,15 @@ async function refresh(append=false){
  rows=append?[...rows,...next]:next;hasMore=result.has_more;renderQueue();$('#connection').textContent='Conectado';
  }catch(error){$('#queue-error').textContent=error.message;$('#queue-error').hidden=false;$('#connection').textContent='Sin conexión';throw error;}finally{busy=false;$('#refresh').disabled=false;$('#load-more').disabled=false;}
 }
+function renderToolCatalog(catalog){
+ for(const [type,id]of [['suaje','die'],['pleca','crease']]){const tools=(catalog.tools||[]).filter(t=>t.tool_type===type&&t.code.startsWith(type==='suaje'?'SJ':'PD')).sort((a,b)=>a.code.localeCompare(b.code,'es',{numeric:true}));const select=$('#'+id+'-select'),previous=select.value;select.innerHTML='<option value="">Sin '+type+' seleccionado</option>'+tools.map(t=>`<option value="${t.id}">${esc(t.code)}</option>`).join('');if([...select.options].some(option=>option.value===previous))select.value=previous;$('#'+id+'-hint').textContent=tools.length?tools.length+' códigos '+(type==='suaje'?'SJ':'PD'):'Catálogo pendiente de cargar.';}
+ const missing=!catalog.tools?.some(t=>t.code.startsWith('SJ'))||!catalog.tools?.some(t=>t.code.startsWith('PD'));
+ $('#tools-status').hidden=!missing;$('#tools-status').textContent=missing?'Falta cargar el catálogo de herramentales en la base de datos. Solicita al administrador completar la carga del PDF y después pulsa Actualizar catálogos.':'';
+}
 function saveDraft(){try{sessionStorage.setItem(storageKey,JSON.stringify({fields:Object.fromEntries(new FormData($('#order-form'))),ink_selections:picker?.value(),pending}));}catch{}}
 async function initialize(){
  if(!/^op_[a-f0-9]{64}$/.test(accessKey))throw Error('Abre el enlace completo de captura que te compartió el administrador.');
- await refresh();const catalog=await api({operation:'catalog'});picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products);for(const [type,id]of [['suaje','die'],['pleca','crease']]){const tools=(catalog.tools||[]).filter(t=>t.tool_type===type&&t.code.startsWith(type==='suaje'?'SJ':'PD')).sort((a,b)=>a.code.localeCompare(b.code,'es',{numeric:true}));$('#'+id+'-select').innerHTML='<option value="">Sin '+type+' seleccionado</option>'+tools.map(t=>`<option value="${t.id}">${esc(t.code)}</option>`).join('');$('#'+id+'-hint').textContent=tools.length?'Selecciona el herramental para esta orden.':'Catálogo de '+type+' pendiente de cargar.';}$('#workspace').hidden=false;
+ await refresh();const catalog=await api({operation:'catalog'});picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products);renderToolCatalog(catalog);$('#workspace').hidden=false;
  const form=$('#order-form');form.elements.scheduled_date.value=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  try{const saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');if(saved){for(const [key,value]of Object.entries(saved.fields||{}))if(form.elements.namedItem(key))form.elements.namedItem(key).value=value;picker.restore(saved.ink_selections||[]);pending=saved.pending;}}catch{}
  form.addEventListener('input',saveDraft);
@@ -39,7 +44,8 @@ async function initialize(){
    await refresh().catch(()=>{});
   }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;}finally{$('#order-fields').disabled=false;}
  };
+ $('#refresh-tools').onclick=async()=>{const button=$('#refresh-tools');button.disabled=true;try{const catalog=await api({operation:'catalog'});renderToolCatalog(catalog);picker.update(catalog.products);}catch(error){$('#tools-status').hidden=false;$('#tools-status').textContent=error.message;}finally{button.disabled=false;}};
  $('#refresh').onclick=()=>refresh().catch(()=>{});$('#load-more').onclick=()=>refresh(true).catch(()=>{});$('#include-finished').onchange=()=>{rows=[];refresh().catch(()=>{});};
- setInterval(()=>{if(!document.hidden){refresh().catch(()=>{});api({operation:'catalog'}).then(c=>picker.update(c.products)).catch(()=>{});}},30000);
+ setInterval(()=>{if(!document.hidden){refresh().catch(()=>{});api({operation:'catalog'}).then(c=>{picker.update(c.products);renderToolCatalog(c);}).catch(()=>{});}},30000);
 }
 initialize().catch(error=>{$('#access-error').textContent=error.message;$('#access-error').hidden=false;$('#connection').textContent='Enlace no disponible';});
