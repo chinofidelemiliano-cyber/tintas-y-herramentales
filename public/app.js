@@ -1,3 +1,4 @@
+import {setupMobileMenu} from './mobile-menu.js';
 import {defaultPDFStyle,normalizePDFStyle} from './pdf-style.js';
 import {prepareIncidentPhoto,incidentSeconds,incidentClock} from './incident-photos.js';
 import { incidentMachines,incidentOwners,incidentImpacts,incidentStatuses,incidentFolio } from './incident-model.js';
@@ -70,9 +71,9 @@ function renderLogin(message=''){
  const picker=document.createElement('label');picker.className='field login-language';picker.innerHTML='Idioma / Language <select aria-label="Idioma / Language"><option value="es">Español</option><option value="en">English</option></select>';picker.querySelector('select').value=settings.language;picker.querySelector('select').onchange=e=>{try{settings=savePreferences({...settings,language:e.target.value});renderLogin(message);}catch{toast('No se pudo guardar el idioma.');}};main.querySelector('.login-panel').append(picker);
 }
 const navs=[['inventario','box','Inventario'],['movimientos','arrows','Ingresos y egresos'],['catalogo','grid','Catálogo'],['ordenes','file','Órdenes de producción'],['preparacion','clock','Tiempos de preparación'],['incidencias','warning','Incidencias'],['cortes','calendar','Cortes mensuales'],['configuracion','tool','Configuración']];
-function go(v){view=navs.some(n=>n[0]===v)?v:'inventario';query='';typeFilter='';providerFilter='';statusFilter='';page=1;document.querySelector('.sidebar').classList.remove('open');render()}
+function go(v){view=navs.some(n=>n[0]===v)?v:'inventario';query='';typeFilter='';providerFilter='';statusFilter='';page=1;closeMobileMenu();render()}
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
-document.querySelector('.mobile-menu').onclick=()=>document.querySelector('.sidebar').classList.toggle('open');
+const closeMobileMenu=setupMobileMenu();
 function days(l){return Math.ceil((Date.parse(l.entry_date)+l.shelf_days*86400000-Date.parse(data.today))/86400000)}
 function status(l){if(l.grams<0)return ['warning','Revisar saldo'];if(l.category==='herramental')return l.grams>0?['','Disponible']:['neutral','Sin existencia'];const d=days(l);return d<0?['expired','Vencida']:d<=30?['warning','Por vencer']:['','Vigente']}
 function badge(l){const [c,t]=status(l);return `<span class="status ${c}">${t}</span>`}

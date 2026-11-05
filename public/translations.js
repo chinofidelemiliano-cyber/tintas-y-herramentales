@@ -1,4 +1,5 @@
 const entries={
+'Cerrar menú':'Close menu',
 'Preferencias de mi perfil':'My profile preferences','Tus ajustes, logo y diseño PDF se guardan en tu cuenta para usarlos en otros dispositivos.':'Your settings, logo and PDF design are saved to your account for use on other devices.','Configuración guardada en tu perfil.':'Settings saved to your profile.','Carga el logo que aparecerá arriba de todas las páginas de tus PDF. Se guarda en tu perfil.':'Upload the logo to display at the top of every PDF page. It is saved to your profile.',
 'Iniciar incidencia':'Start incident','Selecciona la orden y pulsa Iniciar incidencia cuando estés listo.':'Select the order and press Start incident when ready.','Orden lista. Pulsa Iniciar incidencia.':'Order selected. Press Start incident.',
 
