@@ -214,3 +214,7 @@ Detección de zona del dispositivo, zona personalizada y formato de 12/24 horas 
 ## Recuperación de incidencias
 
 Fotos y datos con respaldo local por perfil, sincronización automática y cronómetro fijo entre secciones y en la pestaña. El NP de una orden pendiente se valida aunque no tenga consumos. Actualización en Supabase: `supabase/incident-recovery.sql`. Instrucciones: [recuperación de incidencias](docs/recuperacion-incidencias.md).
+
+## Órdenes de producción agrupadas
+
+El historial muestra una fila por folio dentro del mes seleccionado, con consumo confirmado, tintas y metros contados una vez por registro. Abre la orden para consultar lotes, pesajes, consumos y comentarios; si el folio tiene varios registros, se conserva el acceso individual. Buscar una tinta conserva el detalle completo de la orden. Los PDF incluyen resumen por folio y bloques de consumos agrupados que comparten página cuando caben. Los registros cancelados se conservan y no se suman al consumo activo. No requiere actualizar Supabase.

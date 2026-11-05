@@ -38,14 +38,13 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
  const W=842,H=595,margin=mmToPoints(style.margin),bottom=H-margin-16,size=style.fontSize,lineHeight=size+3,padding={compact:6,normal:10,relaxed:15}[style.rowSpacing],available=W-2*margin;
  const layout=logoLayout(logoImage,W,style),reports=[{title,columns,rows,summary},...sections];
  const textColor=pdfColor(style.textColor),headerColor=pdfColor(style.headerColor),headerText=pdfColor(style.headerTextColor),titleColor=pdfColor(style.titleColor),lineColor=pdfColor(style.lineColor);
- const pages=[];let stream='',y=0,currentColumns=[],noteLines=[];
+ const pages=[];let stream='',y=0,currentColumns=[],noteLines=[],forceTitle=false;
  const wrapped=(value,width,size)=>wrap(value,width,size,style.fontFamily);
  const text=(x,top,value,fontSize=size,bold=false,color=textColor)=>{stream+=`BT /${bold?'F2':'F1'} ${fontSize} Tf ${color} rg 1 0 0 1 ${x.toFixed(2)} ${(H-top).toFixed(2)} Tm (${literal(value)}) Tj ET\n`;};
  const rect=(x,top,w,h,color)=>{stream+=`${color} rg ${x} ${H-top-h} ${w} ${h} re f\n`;};
- function newPage(){
-  if(stream)pages.push(stream);stream='';y=margin;
-  if(layout){stream+=`q ${layout.width} 0 0 ${layout.height} ${layout.x} ${H-layout.y-layout.height} cm /ReportLogo Do Q\n`;y=layout.y+layout.height+mmToPoints(style.logoGap);}
-  if(style.showTitle){text(margin,y+style.titleSize,title,style.titleSize,true,titleColor);y+=style.titleSize+10;}
+ function headerHeight(){return ((style.showTitle||forceTitle)?wrapped(title,available,style.titleSize).length*(style.titleSize+3)+7:0)+(style.showIssuedDate&&subtitle?18:0)+noteLines.length*11+6+Math.max(...currentColumns.map(c=>wrapped(c.label,c.width-12,size).length))*lineHeight+padding;}
+ function drawHeader(){
+  if(style.showTitle||forceTitle){for(const line of wrapped(title,available,style.titleSize)){text(margin,y+style.titleSize,line,style.titleSize,true,titleColor);y+=style.titleSize+3;}y+=7;}
   if(style.showIssuedDate&&subtitle){text(margin,y+9,subtitle,8);y+=18;}
   for(const n of noteLines){text(margin,y+8,n,8);y+=11;}
   y+=6;
@@ -53,10 +52,11 @@ export function createTablePDF({title,subtitle='',notes=[],columns,rows,summary=
   rect(margin,y,available,height,headerColor);let x=margin;
   labels.forEach((lines,i)=>{lines.forEach((line,j)=>text(x+6,y+size+padding/2+j*lineHeight,line,size,true,headerText));x+=currentColumns[i].width;});y+=height;
  }
+ function newPage(){if(stream)pages.push(stream);stream='';y=margin;if(layout){stream+=`q ${layout.width} 0 0 ${layout.height} ${layout.x} ${H-layout.y-layout.height} cm /ReportLogo Do Q\n`;y=layout.y+layout.height+mmToPoints(style.logoGap);}drawHeader();}
  for(const report of reports){
-  ({title,columns,rows,summary=''}=report);if(!columns?.length)throw Error('El reporte necesita columnas.');
+  ({title,columns,rows,summary=''}=report);forceTitle=!!report.forceTitle;if(!columns?.length)throw Error('El reporte necesita columnas.');
   const total=columns.reduce((sum,c)=>sum+c.width,0);if(!Number.isFinite(total)||total<=0)throw Error('Anchos de columna no válidos.');currentColumns=columns.map(c=>({...c,width:c.width*available/total}));
-  noteLines=style.showNotes?[...notes,...(report.notes||[])].flatMap(n=>wrapped(n,available,8)):[];newPage();
+  noteLines=style.showNotes?[...notes,...(report.notes||[])].flatMap(n=>wrapped(n,available,8)):[];const firstRowHeight=rows.length?Math.max(...currentColumns.map((c,i)=>wrapped(rows[0][i],c.width-12,size).length))*lineHeight+padding:30;if(report.continuePage&&stream&&y+20+headerHeight()+firstRowHeight<=bottom){y+=20;drawHeader();}else newPage();
   for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
    const lines=currentColumns.map((c,i)=>wrapped(rows[rowIndex][i],c.width-12,size)),maxLines=Math.max(...lines.map(l=>l.length));let offset=0;
    while(offset<maxLines){
