@@ -9,3 +9,9 @@ La consulta permite elegir el mes de programación (o la fecha del registro si l
 Las órdenes nuevas requieren un metraje programado mayor que cero, también validado por el servidor. Las antiguas sin metraje se conservan y muestran No registrado.
 
 En el detalle de una orden y al capturar sus consumos aparece **Comentarios de la orden → Guardar solo comentario**. Guarda texto, autor y fecha sin exigir pesos ni metros reales, cambiar el estado, cerrar la orden o descontar inventario. Los comentarios son privados: no se publican en el enlace de consulta. Confirmar un consumo sigue requiriendo sus pesos para calcular la salida real. Los comentarios se permiten a cuentas con acceso a producción o preparación, y quedan disponibles en órdenes abiertas y cerradas.
+
+## Acceso con usuario y contraseña
+
+El enlace de consulta ahora requiere las credenciales compartidas indicadas por el administrador. En proyectos ya instalados, ejecuta `supabase/order-status-login.sql` completo; el archivo combinado de estado y comentarios también incluye esta protección al final. El enlace existente no cambia. La contraseña se almacena mediante un hash y se comprueba en el servidor; no está incluida en los archivos del navegador. Cada acceso genera una sesión de consulta de una hora, vinculada al enlace y guardada solo en esa pestaña. Cerrar sesión la revoca. Renovar o desactivar el enlace bloquea también las sesiones anteriores. Tras 10 intentos fallidos hay una espera de 10 minutos. Estos datos de acceso son exclusivos de la consulta compartida, no crean usuarios ni conceden acceso al inventario.
+
+La protección debe aplicarse después de cualquier migración anterior que vuelva a crear las funciones de consulta, para mantener cerrada la ruta sin sesión.
