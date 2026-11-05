@@ -90,3 +90,20 @@ test('timed incidents persist start, protect photo payloads and end only with bo
  const evidence=await(await fetch(base+'/api/incidents/'+row.id+'/evidence')).json();assert.equal(evidence.before_photo,photo);assert.equal(evidence.after_photo,photo);
  await post('incidents',{id:row.id,order_id:order.id,description:'Detalle actualizado',finish:true});assert.equal((await get()).incidents.find(i=>i.id===row.id).ended_at,row.ended_at);assert.deepEqual((await get()).lots.map(l=>[l.id,l.grams]),balance);
 });
+test('production clock is persistent and idempotent, Teams imports drafts without inventory access or duplicate orders',async()=>{
+ const {readFileSync}=await import('node:fs');const html=readFileSync(new URL('./fixtures/teams-order.html',import.meta.url),'utf8');
+ const before=await get(),stock=before.lots.map(l=>[l.id,l.grams]),moveCount=before.movements.length;
+ const connection=await post('teams/connection',{operation:'configure',conversation_id:'chat-test'});assert.match(connection.token,/^tt_[a-f0-9]{64}$/);
+ const receive=async(body,token=connection.token,expected=200)=>{const r=await fetch(base+'/api/teams-orders',{method:'POST',headers:{'Content-Type':'application/json','X-Integration-Key':token},body:JSON.stringify(body)});const data=await r.json();assert.equal(r.status,expected,JSON.stringify(data));return data;};
+ const body={conversation_id:'chat-test',message_id:'message-1',html};
+ await receive(body,'tt_'+'0'.repeat(64),400);await receive({...body,conversation_id:'wrong'},connection.token,400);
+ const imported=await receive(body),id=imported.order_ids[0];assert.ok(id);assert.equal((await receive(body)).duplicate,true);
+ assert.deepEqual((await receive({...body,message_id:'forwarded-message'})).order_ids,[id]);await receive({...body,message_id:'conflicting-message',html:html.replace('12,725','12,726')},connection.token,400);
+ const fresh=await get(),order=fresh.orders.find(o=>o.id===id);assert.equal(order.lines.length,0);assert.equal(order.status,'draft');assert.equal(order.planned_meters,12725);assert.equal(order.np,'NP016-1');assert.equal(order.source,'teams');assert.equal(order.scheduled_start,'07:40');assert.equal(fresh.orders.filter(o=>o.source==='teams').length,1);assert.deepEqual(fresh.lots.map(l=>[l.id,l.grams]),stock);assert.equal(fresh.movements.length,moveCount);assert.equal(JSON.stringify(fresh).includes(connection.token),false);
+ await post('orders/clock',{id,operation:'finish'},400);
+ const start=await post('orders/clock',{id,operation:'start'});assert.ok(start.started_at);assert.equal((await post('orders/clock',{id,operation:'start'})).started_at,start.started_at);
+ await new Promise(r=>setTimeout(r,30));const end=await post('orders/clock',{id,operation:'finish'});assert.ok(Date.parse(end.ended_at)>=Date.parse(start.started_at));assert.equal((await post('orders/clock',{id,operation:'finish'})).ended_at,end.ended_at);await post('orders/clock',{id,operation:'start'},400);
+ // Completing weights preserves timing and consumes only the measured difference.
+ const lot=(await get()).lots.find(l=>l.grams>100);await post('orders/update',{id,capture_mode:'weighing',status:'confirmed',folio:order.folio,product:order.product,client:order.client,pressman:'Prueba',date:order.date,lines:[{lot_id:lot.id,np:order.np,initial_grams:100,final_grams:90}]});const completed=(await get()).orders.find(o=>o.id===id);assert.equal(completed.started_at,start.started_at);assert.equal(completed.ended_at,end.ended_at);assert.equal((await get()).lots.find(l=>l.id===lot.id).grams,lot.grams-10);
+ const rotated=await post('teams/connection',{operation:'configure',conversation_id:'chat-test'});await receive({...body,message_id:'message-2'},connection.token,400);await post('teams/connection',{operation:'disable'});await receive({...body,message_id:'message-2'},rotated.token,400);
+});

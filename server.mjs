@@ -1,4 +1,6 @@
 import http from 'node:http';
+import {randomBytes,createHash} from 'node:crypto';
+import {parseTeamsOrders} from './netlify/lib/teams-parser.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -93,12 +95,44 @@ if (!one("SELECT value FROM metadata WHERE key='order_weighing_v1'")) {
   run("INSERT INTO metadata VALUES('order_weighing_v1','1')");
  });}finally{db.exec('PRAGMA foreign_keys=ON');}
 }
+for(const [column,type] of Object.entries({started_at:'TEXT',ended_at:'TEXT',np:"TEXT NOT NULL DEFAULT ''",source:"TEXT NOT NULL DEFAULT 'manual'",received_at:'TEXT',scheduled_date:'TEXT',scheduled_start:'TEXT',scheduled_end:'TEXT',pieces:'REAL',planned_meters:'REAL',specifications:"TEXT NOT NULL DEFAULT '{}'"}))if(!all('PRAGMA table_info(orders)').some(c=>c.name===column))db.exec(`ALTER TABLE orders ADD COLUMN ${column} ${type}`);
+db.exec(`CREATE TABLE IF NOT EXISTS teams_connection(id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS teams_receipts(conversation_id TEXT NOT NULL,message_id TEXT NOT NULL,order_ids TEXT NOT NULL,PRIMARY KEY(conversation_id,message_id));`);
+const hashToken=token=>createHash('sha256').update(token).digest('hex');
+function orderClock(b){
+ const row=one('SELECT * FROM orders WHERE id=?',Number(b.id));if(!row||row.status==='cancelled')fail('Orden no encontrada o cancelada.');
+ if(b.operation==='start'){if(row.ended_at)fail('La orden ya finalizó.');run('UPDATE orders SET started_at=coalesce(started_at,?) WHERE id=?',new Date().toISOString(),row.id);}
+ else if(b.operation==='finish'){if(!row.started_at)fail('Primero inicia la orden.');run('UPDATE orders SET ended_at=coalesce(ended_at,?) WHERE id=?',new Date().toISOString(),row.id);}
+ else fail('Acción de cronómetro no válida.');
+ return one('SELECT id,started_at,ended_at FROM orders WHERE id=?',row.id);
+}
+function teamsConnection(b){
+ let token=null;
+ if(b.operation==='configure'){const chat=required(b.conversation_id,'el ID del chat autorizado');if(chat.length>500)fail('ID demasiado largo.');token='tt_'+randomBytes(32).toString('hex');run('INSERT INTO teams_connection VALUES(1,?,?,1) ON CONFLICT(id) DO UPDATE SET conversation_id=excluded.conversation_id,token_hash=excluded.token_hash,enabled=1',chat,hashToken(token));}
+ else if(b.operation==='disable')run('UPDATE teams_connection SET enabled=0 WHERE id=1');
+ else if(b.operation!=='status')fail('Acción no válida.');
+ const row=one('SELECT * FROM teams_connection WHERE id=1');return {enabled:!!row?.enabled,conversation_id:row?.conversation_id||'',token};
+}
+function receiveTeams(b,token){
+ if(typeof token!=='string'||!/^tt_[a-f0-9]{64}$/.test(token))fail('Conexión no autorizada.');
+ const connection=one('SELECT * FROM teams_connection WHERE id=1 AND enabled=1 AND token_hash=?',hashToken(token));
+ if(!connection||connection.conversation_id!==b.conversation_id)fail('Conexión o chat no autorizado.');
+ const msg=required(b.message_id,'message_id');if(msg.length>500)fail('ID de mensaje demasiado largo.');
+ const old=one('SELECT order_ids FROM teams_receipts WHERE conversation_id=? AND message_id=?',b.conversation_id,msg);if(old)return {duplicate:true,order_ids:JSON.parse(old.order_ids)};
+ const parsed=parseTeamsOrders(b.html),ids=[];
+ for(const item of parsed){
+  if(item.folio.length>100||item.np.length>100||item.product.length>150||item.client.length>150)fail('Datos de orden demasiado largos.');
+  const existing=one("SELECT * FROM orders WHERE source='teams' AND status<>'cancelled' AND folio=? AND np=? AND scheduled_date IS ? ORDER BY id LIMIT 1",item.folio,item.np,item.scheduled_date);
+  if(existing){if(existing.product!==item.product||existing.client!==item.client||existing.pieces!==item.pieces||existing.planned_meters!==item.meters||existing.scheduled_start!==item.scheduled_start||existing.scheduled_end!==item.scheduled_end||existing.specifications!==JSON.stringify(item.specifications))fail('La orden ya existe con datos diferentes.');ids.push(existing.id);continue;}
+  ids.push(Number(run("INSERT INTO orders(folio,np,client,product,date,status,source,received_at,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications) VALUES(?,?,?,?,?,'draft','teams',?,?,?,?,?,?,?)",item.folio,item.np,item.client,item.product,today(),new Date().toISOString(),item.scheduled_date,item.scheduled_start,item.scheduled_end,item.pieces,item.meters,JSON.stringify(item.specifications)).lastInsertRowid));
+ }
+ run('INSERT INTO teams_receipts VALUES(?,?,?)',b.conversation_id,msg,JSON.stringify(ids));return {duplicate:false,order_ids:ids};
+}
 function state() {
   return {incidents:all('SELECT * FROM incidents ORDER BY incident_number DESC').map(({before_photo,after_photo,...i})=>({...i,has_before:!!before_photo,has_after:!!after_photo,elapsed_seconds:incidentSeconds(i),folio:incidentFolio(i.incident_number)})),preparations:all('SELECT * FROM preparations ORDER BY date DESC,start_time DESC,id DESC'),today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
     products:all('SELECT * FROM products ORDER BY name'),
     lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
-    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
+    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,specifications:JSON.parse(o.specifications||'{}'),lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
 }
 function startIncident(b){
@@ -234,7 +268,7 @@ function cancelOrder(b) {
     run('UPDATE lots SET grams=grams+? WHERE id=?',m.grams,m.lot_id);
     run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,?,?,?,?,?,?)',m.lot_id,'in',m.grams,m.cost_kg,d,`Cancelación ${o.folio}`,o.id);
   }
-  run("UPDATE orders SET status='cancelled' WHERE id=?",o.id);
+  run("UPDATE orders SET status='cancelled',ended_at=CASE WHEN started_at IS NOT NULL THEN coalesce(ended_at,?) ELSE ended_at END WHERE id=?",new Date().toISOString(),o.id);
 }
 function closeMonth(b) {
   const month=required(b.month,'el mes');
@@ -266,7 +300,8 @@ const server=http.createServer(async(req,res)=>{
       if(req.headers.origin && req.headers.origin!==`http://${req.headers.host}` && req.headers.origin!==`https://${req.headers.host}`) fail('Origen no permitido.');
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>1000000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
-      const actions={'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      if(url.pathname==='/api/teams-orders'){const result=tx(()=>receiveTeams(b,req.headers['x-integration-key']));res.end(JSON.stringify({ok:true,...result}));return;}
+      const actions={'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       const result=tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true,...(result||{})}));return;
     }

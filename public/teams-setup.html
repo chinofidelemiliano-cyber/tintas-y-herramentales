@@ -1,0 +1,32 @@
+<!doctype html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Conectar órdenes de Teams</title><style>body{font:16px/1.7 system-ui;color:#24344f;max-width:850px;margin:40px auto;padding:0 20px}h1{line-height:1.2}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f4f9;padding:20px;border-radius:8px}a{color:#245da0}li{margin-bottom:14px}.note{background:#fff6dc;padding:18px;border-radius:8px}</style></head><body>
+<h1>Órdenes de Teams → Inventario</h1>
+<p>La conexión usa un flujo de Power Automate del propietario del chat. Tus compañeros siguen enviando tablas por Teams y no necesitan cuentas del inventario. Esta página es una guía; no solicita acceso al inventario ni envía mensajes.</p>
+<p class="note">Requiere Microsoft Teams y Power Automate autorizados por tu organización. La acción HTTP puede requerir licencia Premium. Solo se importan tablas HTML de texto; una captura, foto o PDF necesita un paso de OCR adicional y no se importa con esta conexión.</p>
+<h2>1. Activar la base de datos</h2>
+<p>En Supabase → SQL Editor, ejecuta <strong>todo</strong> <a href="https://github.com/chinofidelemiliano-cyber/tintas-y-herramentales/blob/main/supabase/production-tracking-teams.sql" target="_blank" rel="noopener">production-tracking-teams.sql</a>. No necesitas volver a ejecutar setup.sql.</p>
+<h2>2. Crear el flujo en Microsoft</h2>
+<ol>
+<li>Abre <a href="https://make.powerautomate.com/" target="_blank" rel="noopener">Power Automate</a> → Crear → Flujo de nube automatizado. Usa el disparador de Microsoft Teams <strong>When a new chat message is added</strong> (cuando se agrega un mensaje nuevo al chat). La cuenta conectada debe participar en el chat. Si tu organización no ofrece ese disparador para el tipo de chat, el administrador debe habilitar una ruta compatible; no uses un disparador de canal para un chat privado.</li>
+<li>Prueba el disparador con un mensaje sin datos sensibles. Identifica los campos <strong>Chat ID / Conversation ID</strong>, <strong>Message ID</strong> y <strong>Body content</strong> (HTML). Si el disparador no incluye el cuerpo completo, agrega la acción de Teams <strong>Get message details</strong> con el chat y el mensaje obtenidos del disparador.</li>
+<li>Agrega una condición: el ID del chat debe coincidir con el chat elegido y el HTML debe contener una tabla (<code>&lt;table</code>) y una orden (<code>OP-</code>). Solo en la rama Sí se envía la solicitud. Así los saludos y mensajes normales no se procesan como órdenes.</li>
+</ol>
+<h2>3. Autorizar el chat en el inventario</h2>
+<p>En <a href="/#ordenes">Órdenes de producción</a> → <strong>Conectar Teams</strong>, pega el ID del chat y pulsa <strong>Crear / renovar clave</strong>. Copia la URL y la clave: la clave solo se muestra una vez. No la pegues en el chat de Teams ni en esta conversación.</p>
+<h2>4. Agregar la acción HTTP</h2>
+<p>En la rama Sí del flujo, agrega una acción HTTP con método <strong>POST</strong>, la URL de recepción mostrada en el inventario y estos encabezados:</p>
+<pre>Content-Type: application/json
+X-Integration-Key: [clave que acabas de copiar]</pre>
+<p>En el cuerpo inserta un objeto JSON usando los campos de <strong>contenido dinámico</strong> del disparador / detalle del mensaje. Los valores entre corchetes son referencias para sustituir, no texto literal. Inserta el HTML como valor de cadena mediante el editor de objetos de Power Automate para que las comillas se escapen correctamente.</p>
+<pre>{
+  "conversation_id": "[Chat ID / Conversation ID]",
+  "message_id": "[Message ID]",
+  "html": "[Body content completo en HTML]"
+}</pre>
+<p>Activa <strong>Entradas seguras / Salidas seguras</strong> en la configuración de la acción HTTP para que la clave y los datos de producción no aparezcan en el historial del flujo. No se usa contraseña de Supabase ni clave service_role.</p>
+<h2>5. Verificar una orden</h2>
+<p>Envía una tabla de texto con estos encabezados y sus valores: <strong>Orden de producción, Número de Parte, Descripción del producto, Cliente, Cantidad de piezas, Cantidad de mts</strong>. Opcionalmente incluye FECHA, HORA INICIO, HORA TERMINO y la tabla de Suaje, paso de suaje, paso desarrollo, pleca, TH, UV, Colores y Pantone. Usa fecha DD/MM/AAAA, horas de 24 horas HH:mm y comas para millares (12,725).</p>
+<p>La acción HTTP debe responder <strong>200</strong> con <code>order_ids</code>. La orden aparece como <strong>Pendiente</strong>, con origen Teams, NP y datos programados; no descuenta tinta ni inicia el cronómetro. El inventario revisa órdenes nuevas cada 30 segundos mientras estás en esa sección, sin formularios abiertos; también puedes recargar.</p>
+<p>El ID del mensaje evita duplicados en los reintentos. Las ediciones posteriores del mismo mensaje no sobrescriben la orden: los cambios deben revisarse en el inventario. Para registrar consumos, abre la orden → Capturar / completar tintas y pesos. Solo confirmar esos pesos descuenta tinta. Iniciar y Finalizar guardan horas reales independientes del consumo.</p>
+<h2>Desconectar</h2>
+<p>Órdenes → Conectar Teams → <strong>Desconectar</strong>. Renovar la clave invalida la anterior: actualízala en Power Automate. La conexión permite recibir órdenes del chat autorizado; no permite leer inventario ni acceder a otras funciones.</p>
+</body></html>

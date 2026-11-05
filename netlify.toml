@@ -3,3 +3,13 @@
 
 [build.environment]
   NODE_VERSION = "24"
+
+[functions]
+  directory = "netlify/functions"
+  included_files = ["public/cloud-config.json"]
+
+[[redirects]]
+  from = "/api/teams-orders"
+  to = "/.netlify/functions/teams-orders"
+  status = 200
+  force = true
