@@ -8,6 +8,7 @@ export function normalizePortalOrder(value){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(result.scheduled_date)||!Number.isFinite(Date.parse(result.scheduled_date))||new Date(result.scheduled_date).toISOString().slice(0,10)!==result.scheduled_date)throw Error('Fecha no válida.');
  for(const key of ['scheduled_start','scheduled_end'])if(result[key]&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(result[key]))throw Error('Hora no válida.');
  for(const key of ['pieces','meters']){if(value?.[key]===''||value?.[key]==null)result[key]=null;else{const n=Number(value[key]);if(!Number.isFinite(n)||n<0||n>1e12)throw Error('Cantidad no válida.');result[key]=n;}}
+ if(result.meters===null||result.meters<=0)throw Error('Captura un metraje mayor que cero.');
  if(value?.ink_selections!==undefined){
   if(!Array.isArray(value.ink_selections)||value.ink_selections.length>(result.machine.startsWith('Comco')?6:12))throw Error('Demasiadas posiciones de color.');
   const seen=new Set();result.ink_selections=value.ink_selections.map(i=>{if(i.custom_id){if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(i.custom_id))throw Error('Tinta personalizada no válida.');}

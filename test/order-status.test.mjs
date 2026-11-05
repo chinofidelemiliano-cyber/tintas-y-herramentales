@@ -1,0 +1,5 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {orderStatus,orderMonth,publicOrderStatus} from '../public/order-status-model.js';
+test('monthly status uses scheduled month and separates waiting, preparing, prepared, closed and cancelled',()=>{
+ const base={id:1,folio:'OP-1',date:'2026-11-05',scheduled_date:'2026-12-01',status:'draft',planned_meters:123.456};assert.equal(orderMonth(base),'2026-12');assert.equal(orderMonth({...base,scheduled_date:null}),'2026-11');assert.equal(orderStatus(base),'En espera');assert.equal(orderStatus({...base,started_at:'2026-11-05T08:00:00Z'}),'En preparación');assert.equal(orderStatus({...base,ended_at:'2026-11-05T09:00:00Z'}),'Preparada');assert.equal(orderStatus({...base,status:'confirmed'}),'Cerrada');assert.equal(orderStatus({...base,status:'cancelled'}),'Cancelada');
+ const safe=publicOrderStatus({...base,notes:'Comentario privado',cost_kg:100,lines:[{grams:999}],access_key:'private'});assert.equal(safe.meters,123.456);for(const field of ['notes','cost_kg','lines','access_key'])assert.ok(!(field in safe));
+});

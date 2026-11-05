@@ -1,0 +1,3 @@
+export function orderStatus(order){return order.status==='cancelled'?'Cancelada':order.status==='confirmed'?'Cerrada':order.ended_at?'Preparada':order.started_at?'En preparación':'En espera';}
+export const orderMonth=order=>String(order.scheduled_date||order.date).slice(0,7);
+export function publicOrderStatus(order){return {id:order.id,folio:order.folio,np:order.np||'',product:order.product||'',client:order.client||'',machine:order.machine||'',pressman:order.pressman||'',scheduled_date:order.scheduled_date||order.date,scheduled_start:order.scheduled_start||'',scheduled_end:order.scheduled_end||'',started_at:order.started_at||null,ended_at:order.ended_at||null,meters:order.planned_meters??null,queue_number:order.queue_number??null,status:orderStatus(order)};}

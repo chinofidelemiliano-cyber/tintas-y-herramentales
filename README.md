@@ -200,3 +200,7 @@ En **Metros por suaje** se acumulan los metros reales de órdenes confirmadas re
 ## Tintas para captura de órdenes
 
 Tipo Base Agua / UV / Film por cada posición de tinta, con órdenes mixtas y opciones personalizadas administradas desde Configuración del perfil. Activación e instrucciones: [tintas de captura](docs/tintas-de-captura.md). En proyectos existentes se requiere `supabase/order-ink-options.sql`.
+
+## Consulta mensual y comentarios independientes
+
+Metraje programado obligatorio para nuevas capturas, enlace privado de solo lectura por mes y comentarios que no registran consumos. Activación: [estado mensual y comentarios](docs/estado-mensual-y-comentarios.md); ejecutar `supabase/order-status-and-comments.sql` en proyectos existentes.

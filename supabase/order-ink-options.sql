@@ -41,6 +41,7 @@ begin
  end if;
  -- A catalog call checks the link before reading configuration or validating submitted products.
  perform public.prisma_order_portal_ink_internal(access_key,jsonb_build_object('operation','catalog'));
+ if nullif(b->>'meters','') is null or (b->>'meters')::numeric<=0 or (b->>'meters')::numeric>1e12 then raise exception 'Captura un metraje mayor que cero.';end if;
  if global_family is not null and global_family not in ('Base Agua','UV','Film') then raise exception 'Selecciona Base Agua, UV o Film.';end if;
  options:=coalesce((select s.options from public.prisma_order_ink_settings s where id=1),'[]'::jsonb);
  for item in select value from jsonb_array_elements(coalesce(b->'ink_selections','[]'::jsonb)) loop
