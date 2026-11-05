@@ -1616,11 +1616,11 @@ begin
  if payload->>'operation'='save' then
   options:=payload->'options';if jsonb_typeof(options) is distinct from 'array' or jsonb_array_length(options)>100 then raise exception 'Configura hasta 100 tintas personalizadas.';end if;
   for item in select value from jsonb_array_elements(options) loop
-   if coalesce(item->>'id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or item->>'id'=any(seen) or coalesce(btrim(item->>'label'),'')='' or length(item->>'label')>80 or coalesce(item->>'family','') not in ('Base Agua','UV') then raise exception 'Revisa las opciones personalizadas.';end if;
+   if coalesce(item->>'id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' or item->>'id'=any(seen) or coalesce(btrim(item->>'label'),'')='' or length(item->>'label')>80 or coalesce(item->>'family','') not in ('Base Agua','UV','Film') then raise exception 'Revisa las opciones personalizadas.';end if;
    seen:=array_append(seen,item->>'id');
    if nullif(item->>'product_id','') is not null then
     select * into p from public.prisma_products where id=(item->>'product_id')::bigint and category='tinta';
-    if not found or (item->>'family'='UV' and lower(btrim(p.kind))<>'uv') or (item->>'family'='Base Agua' and lower(btrim(p.kind)) not in ('base agua','base de agua','agua')) then raise exception 'La tinta relacionada debe ser del mismo tipo.';end if;
+    if not found or (item->>'family'='UV' and lower(btrim(p.kind))<>'uv') or (item->>'family'='Film' and lower(btrim(p.kind))<>'film') or (item->>'family'='Base Agua' and lower(btrim(p.kind)) not in ('base agua','base de agua','agua')) then raise exception 'La tinta relacionada debe ser del mismo tipo.';end if;
    end if;
   end loop;
   insert into public.prisma_order_ink_settings(id,owner_id,options) values(1,auth.uid(),options) on conflict(id) do update set owner_id=auth.uid(),options=excluded.options,updated_at=now();
@@ -1647,10 +1647,10 @@ begin
  end if;
  -- A catalog call checks the link before reading configuration or validating submitted products.
  perform public.prisma_order_portal_ink_internal(access_key,jsonb_build_object('operation','catalog'));
- if global_family is not null and global_family not in ('Base Agua','UV') then raise exception 'Selecciona Base Agua o UV.';end if;
+ if global_family is not null and global_family not in ('Base Agua','UV','Film') then raise exception 'Selecciona Base Agua, UV o Film.';end if;
  options:=coalesce((select s.options from public.prisma_order_ink_settings s where id=1),'[]'::jsonb);
  for item in select value from jsonb_array_elements(coalesce(b->'ink_selections','[]'::jsonb)) loop
-  family:=coalesce(item->>'ink_family',global_family);if family is not null and family not in ('Base Agua','UV') then raise exception 'Selecciona Base Agua o UV en cada tinta.';end if;entry:=item;
+  family:=coalesce(item->>'ink_family',global_family);if family is not null and family not in ('Base Agua','UV','Film') then raise exception 'Selecciona Base Agua, UV o Film en cada tinta.';end if;entry:=item;
   if coalesce(item->>'custom_id','')<>'' then
    select value into custom from jsonb_array_elements(options) where value->>'id'=item->>'custom_id' and value->>'family'=family;
    if custom is null then raise exception 'La tinta personalizada cambió. Actualiza el catálogo.';end if;
@@ -1658,7 +1658,7 @@ begin
   end if;
   if nullif(entry->>'product_id','') is not null then
    select * into p from public.prisma_products where id=(entry->>'product_id')::bigint and category='tinta';
-   if not found or (family='UV' and lower(btrim(p.kind))<>'uv') or (family='Base Agua' and lower(btrim(p.kind)) not in ('base agua','base de agua','agua')) then raise exception 'La tinta no corresponde al tipo seleccionado.';end if;
+   if not found or (family='UV' and lower(btrim(p.kind))<>'uv') or (family='Film' and lower(btrim(p.kind))<>'film') or (family='Base Agua' and lower(btrim(p.kind)) not in ('base agua','base de agua','agua')) then raise exception 'La tinta no corresponde al tipo seleccionado.';end if;
   end if;
   if family is not null then
    if item ? 'ink_family' then entry:=entry||jsonb_build_object('ink_family',family);end if;families:=array_append(families,family);
@@ -1669,7 +1669,7 @@ begin
   selections:=selections||jsonb_build_array(entry);
  end loop;
  result:=public.prisma_order_portal_ink_internal(access_key,jsonb_set(payload,'{order,ink_selections}',selections));
- if cardinality(families)>0 then summary:=case when 'Base Agua'=any(families) and 'UV'=any(families) then 'Mixta (Base Agua + UV)' else families[1] end;elsif global_family is not null then summary:=global_family;end if;
+ if cardinality(families)>0 then select array_agg(f order by array_position(array['Base Agua','UV','Film'],f)) into families from (select distinct unnest(families) as f)x;summary:=case when cardinality(families)>1 then 'Mixta ('||array_to_string(families,' + ')||')' else families[1] end;elsif global_family is not null then summary:=global_family;end if;
  if summary is not null then update public.prisma_orders set specifications=specifications||jsonb_build_object('tipo_tinta',summary,'colores',array_to_string(labels,' · ')) where id=(result->>'id')::bigint;end if;
  return result;
 end $$;
