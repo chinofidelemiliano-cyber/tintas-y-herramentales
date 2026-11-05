@@ -347,7 +347,7 @@ function closeMonth(b) {
   });
   run('INSERT INTO cuts(month,created_at,snapshot) VALUES(?,?,?)',month,new Date().toISOString(),JSON.stringify(rows));
 }
-const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'};
+const mime={'.webmanifest':'application/manifest+json','.png':'image/png','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml'};
 const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost');
   try {

@@ -1,0 +1,3 @@
+# El webhook usa una clave interna y las operaciones de perfil verifican el JWT en el código.
+[functions.push-notifications]
+verify_jwt = false

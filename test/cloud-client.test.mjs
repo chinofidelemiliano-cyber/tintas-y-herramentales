@@ -13,6 +13,8 @@ test('cloud connector requires login and uses only public configuration plus use
   if(url.endsWith('/prisma_get_preferences'))return Response.json(null);
   if(url.endsWith('/prisma_save_preferences'))return Response.json(JSON.parse(options.body).payload);
   if(url.endsWith('/prisma_state'))return failState?Response.json({code:'PGRST202',message:'missing function'},{status:404}):Response.json({products:[],lots:[]});
+  if(url.endsWith('/prisma_devices'))return Response.json({devices:[]});
+  if(url.endsWith('/functions/v1/push-notifications'))return Response.json({public_key:'test-public-vapid-key'});
   if(url.endsWith('/prisma_complete_pantone'))return Response.json({ok:true});
   if(url.endsWith('/prisma_manage_order_portal'))return Response.json({enabled:false});
   if(url.endsWith('/prisma_order_clock')||url.endsWith('/prisma_teams_connection'))return Response.json({ok:true});
@@ -32,6 +34,7 @@ test('cloud connector requires login and uses only public configuration plus use
  await cloud.action('orders/clock',{id:9,operation:'start'});assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/prisma_order_clock')).options.body),{payload:{id:9,operation:'start'}});await cloud.action('teams/connection',{operation:'status'});assert.ok(calls.some(c=>c.url.endsWith('/prisma_teams_connection')));
  assert.deepEqual(await cloud.action('order-portal/manage',{operation:'status'}),{enabled:false});
  await cloud.action('pantones/complete',{id:1,kilograms:.5,ingredients:[]});assert.ok(calls.some(c=>c.url.endsWith('/prisma_complete_pantone')));
+ assert.deepEqual(await cloud.devices({operation:'list'}),{devices:[]});assert.deepEqual(await cloud.pushConfiguration(),{public_key:'test-public-vapid-key'});const pushConfig=calls.find(c=>c.url.endsWith('/functions/v1/push-notifications'));assert.equal(pushConfig.options.headers.Authorization,'Bearer fake-user-access-token');assert.deepEqual(JSON.parse(pushConfig.options.body),{action:'config'});
  assert.equal(cloud.userId(),'test-user');assert.equal(await cloud.preferences(),null);assert.deepEqual(await cloud.savePreferences({theme:'dark'},true),{theme:'dark'});assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/prisma_save_preferences')).options.body),{payload:{theme:'dark'},only_if_missing:true});
  failState=true;await assert.rejects(cloud.state(),/setup.sql/);
  await cloud.signOut();assert.equal(cloud.hasSession(),false);assert.equal(storage.size,0);
