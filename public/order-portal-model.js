@@ -11,5 +11,6 @@ export function normalizePortalOrder(value){
   const seen=new Set();result.ink_selections=value.ink_selections.map(i=>{const slot=Number(i.slot),product_id=i.product_id==null?null:Number(i.product_id),pantone=String(i.pantone||'').trim();if(!Number.isInteger(slot)||slot<1||slot>(result.machine.startsWith('Comco')?6:12)||seen.has(slot)||((product_id!==null)===(pantone!==''))||(product_id!==null&&(!Number.isSafeInteger(product_id)||product_id<=0))||pantone.length>100)throw Error('Revisa las posiciones de tinta / Pantone.');seen.add(slot);return {slot,product_id,pantone};});
   if(!result.ink_selections.length&&!result.colors)throw Error('Selecciona al menos un color.');
  }
+ for(const key of ['die_id','crease_id']){const id=value?.[key];if(id!==undefined){result[key]=id===''||id==null?null:Number(id);if(result[key]!==null&&(!Number.isSafeInteger(result[key])||result[key]<=0))throw Error('Herramental no válido.');}}
  return result;
 }

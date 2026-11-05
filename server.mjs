@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {decimalDifference,decimalSum} from './public/quantity.js';
 import {mixtureRecipe} from './public/pantone-model.js';
 import {normalizePortalOrder} from './public/order-portal-model.js';
 import {randomBytes,createHash} from 'node:crypto';
@@ -101,6 +102,7 @@ for(const [column,type] of Object.entries({started_at:'TEXT',ended_at:'TEXT',np:
 db.exec(`CREATE TABLE IF NOT EXISTS teams_connection(id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS teams_receipts(conversation_id TEXT NOT NULL,message_id TEXT NOT NULL,order_ids TEXT NOT NULL,PRIMARY KEY(conversation_id,message_id));`);
 for(const [column,type] of Object.entries({machine:"TEXT NOT NULL DEFAULT ''",queue_number:'INTEGER'}))if(!all('PRAGMA table_info(orders)').some(c=>c.name===column))db.exec(`ALTER TABLE orders ADD COLUMN ${column} ${type}`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS order_queue_number ON orders(queue_number) WHERE queue_number IS NOT NULL;CREATE TABLE IF NOT EXISTS order_portal_access(id INTEGER PRIMARY KEY,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS order_portal_submissions(request_key TEXT PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),payload_hash TEXT NOT NULL);`);
+if(!all('PRAGMA table_info(products)').some(c=>c.name==='tool_type'))db.exec("ALTER TABLE products ADD COLUMN tool_type TEXT NOT NULL DEFAULT ''");
 if(!all('PRAGMA table_info(orders)').some(c=>c.name==='ink_selections'))db.exec("ALTER TABLE orders ADD COLUMN ink_selections TEXT NOT NULL DEFAULT '[]'");
 db.exec(`CREATE TABLE IF NOT EXISTS pantone_requests(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),slot INTEGER NOT NULL,pantone TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,prepared_at TEXT,output_grams REAL,output_lot_id INTEGER REFERENCES lots(id),UNIQUE(order_id,slot));CREATE TABLE IF NOT EXISTS pantone_ingredients(id INTEGER PRIMARY KEY,request_id INTEGER NOT NULL REFERENCES pantone_requests(id),lot_id INTEGER NOT NULL REFERENCES lots(id),grams REAL NOT NULL,cost_kg REAL NOT NULL);`);
 function completePantone(b){
@@ -111,7 +113,7 @@ function completePantone(b){
  const code='MIX-PANTONE-'+request.id;if(one('SELECT id FROM products WHERE code=?',code))fail('Ya existe el código de esta mezcla.');
  const costKg=totalCost/(recipe.outputGrams/1000),productId=Number(run("INSERT INTO products(code,name,kind,provider,category,minimum,cost_kg) VALUES(?,?,'Mezcla','Preparación interna','tinta',0,?)",code,'Pantone '+request.pantone,costKg).lastInsertRowid);
  const outputLot=Number(run('INSERT INTO lots(product_id,lot,entry_date,shelf_days,cost_kg,grams) VALUES(?,?,?,?,?,?)',productId,'MIX-'+request.id+'-'+d,d,365,costKg,recipe.outputGrams).lastInsertRowid);
- for(const i of lots){run('UPDATE lots SET grams=grams-? WHERE id=?',i.grams,i.lot_id);run('INSERT INTO pantone_ingredients(request_id,lot_id,grams,cost_kg) VALUES(?,?,?,?)',request.id,i.lot_id,i.grams,i.cost_kg);run("INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,'out',?,?,?,?,?)",i.lot_id,i.grams,i.cost_kg,d,'Preparación Pantone '+request.pantone+' · '+o.folio,null);}
+ for(const i of lots){run('UPDATE lots SET grams=? WHERE id=?',decimalDifference(one('SELECT grams FROM lots WHERE id=?',i.lot_id).grams,i.grams),i.lot_id);run('INSERT INTO pantone_ingredients(request_id,lot_id,grams,cost_kg) VALUES(?,?,?,?)',request.id,i.lot_id,i.grams,i.cost_kg);run("INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,'out',?,?,?,?,?)",i.lot_id,i.grams,i.cost_kg,d,'Preparación Pantone '+request.pantone+' · '+o.folio,null);}
  run("INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,'in',?,?,?,?,?)",outputLot,recipe.outputGrams,costKg,d,'Mezcla Pantone '+request.pantone+' · '+o.folio,null);
  run("UPDATE pantone_requests SET status='completed',prepared_at=?,output_grams=?,output_lot_id=? WHERE id=?",new Date().toISOString(),recipe.outputGrams,outputLot,request.id);return {id:request.id,output_lot_id:outputLot};
 }
@@ -125,10 +127,10 @@ function manageOrderPortal(b){
 function orderPortal(b){
  if(typeof b.access_key!=='string'||!/^op_[a-f0-9]{64}$/.test(b.access_key)||!one('SELECT id FROM order_portal_access WHERE id=1 AND enabled=1 AND token_hash=?',hashToken(b.access_key)))fail('El enlace fue desactivado o cambió. Solicita el enlace vigente.');
  const payload=b.payload||{};
- if(payload.operation==='catalog')return {products:all("SELECT p.id,p.code,p.name,p.kind,p.provider,EXISTS(SELECT 1 FROM lots l WHERE l.product_id=p.id AND l.grams>0) AS available FROM products p WHERE p.category='tinta' ORDER BY p.name,p.code")};
+ if(payload.operation==='catalog')return {tools:all("SELECT id,code,name,coalesce(nullif(tool_type,''),lower(kind)) AS tool_type FROM products WHERE category='herramental' AND (tool_type IN ('suaje','pleca') OR lower(kind) IN ('suaje','pleca')) ORDER BY name,code"),products:all("SELECT p.id,p.code,p.name,p.kind,p.provider,EXISTS(SELECT 1 FROM lots l WHERE l.product_id=p.id AND l.grams>0) AS available FROM products p WHERE p.category='tinta' ORDER BY p.name,p.code")};
  if(payload.operation==='list'){
   const cursor=Number(payload.after_sequence||0);if(!Number.isSafeInteger(cursor)||cursor<0)fail('Secuencia no válida.');
-  const rows=all("SELECT id,queue_number,folio,np,product,client,pressman,machine,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes,status,started_at,ended_at,received_at FROM orders WHERE source='portal' AND queue_number>? AND (?=1 OR (status<>'cancelled' AND ended_at IS NULL)) ORDER BY queue_number LIMIT 51",cursor,payload.include_finished===true?1:0).map(({specifications,...o})=>({...o,colors:JSON.parse(specifications).colores||''}));
+  const rows=all("SELECT id,queue_number,folio,np,product,client,pressman,machine,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes,status,started_at,ended_at,received_at FROM orders WHERE source='portal' AND queue_number>? AND (?=1 OR (status<>'cancelled' AND ended_at IS NULL)) ORDER BY queue_number LIMIT 51",cursor,payload.include_finished===true?1:0).map(({specifications,...o})=>({...o,colors:JSON.parse(specifications).colores||'',die:JSON.parse(specifications).suaje||'',crease:JSON.parse(specifications).pleca||''}));
   return {orders:rows.slice(0,50),has_more:rows.length>50};
  }
  if(payload.operation!=='submit')fail('Acción no permitida.');
@@ -139,6 +141,7 @@ function orderPortal(b){
  if(item.ink_selections?.length)item.colors=item.ink_selections.map(i=>{if(i.pantone)return 'Pantone '+i.pantone;const p=one("SELECT * FROM products WHERE id=? AND category='tinta'",i.product_id);if(!p)fail('Tinta del catálogo no encontrada.');return p.name+' ['+p.code+']';}).join(' · ');
  const n=one('SELECT coalesce(max(queue_number),0)+1 AS n FROM orders').n;
  const id=Number(run("INSERT INTO orders(folio,np,product,client,pressman,machine,date,status,source,received_at,queue_number,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes) VALUES(?,?,?,?,?,?,?,'draft','portal',?,?,?,?,?,?,?,?,?)",item.folio,item.np,item.product,item.client,item.pressman,item.machine,today(),new Date().toISOString(),n,item.scheduled_date,item.scheduled_start,item.scheduled_end||null,item.pieces,item.meters,JSON.stringify({colores:item.colors}),item.notes).lastInsertRowid);
+ const specs={colores:item.colors};for(const [key,type,label] of [['die_id','suaje','suaje'],['crease_id','pleca','pleca']])if(item[key]){const tool=one("SELECT * FROM products WHERE id=? AND category='herramental'",item[key]);if(!tool||(tool.tool_type||tool.kind.toLowerCase())!==type)fail('Herramental no válido para '+label+'.');specs[label]=tool.code+' · '+tool.name;specs[key]=tool.id;}run('UPDATE orders SET specifications=? WHERE id=?',JSON.stringify(specs),id);
  run('UPDATE orders SET ink_selections=? WHERE id=?',JSON.stringify(item.ink_selections||[]),id);for(const ink of item.ink_selections||[])if(ink.pantone)run('INSERT INTO pantone_requests(order_id,slot,pantone,created_at) VALUES(?,?,?,?)',id,ink.slot,ink.pantone,new Date().toISOString());
  run('INSERT INTO order_portal_submissions VALUES(?,?,?)',payload.request_key,id,signature);return {id,queue_number:n,duplicate:false};
 }
@@ -257,7 +260,7 @@ function move(b) {
   else fail('Tipo de movimiento no válido.');
   if(!l) fail('Lote no encontrado.');
   if(b.type==='out' && l.grams<grams) fail('Existencia insuficiente en este lote.');
-  run('UPDATE lots SET grams=grams+? WHERE id=?',b.type==='in'?grams:-grams,l.id);
+  run('UPDATE lots SET grams=? WHERE id=?',decimalSum([l.grams,b.type==='in'?grams:-grams]),l.id);
   run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason) VALUES(?,?,?,?,?,?)',l.id,b.type,grams,l.cost_kg,d,reason);
 }
 function createOrder(b, existingId=null) {
@@ -282,11 +285,11 @@ function createOrder(b, existingId=null) {
       if(line.final_grams!==''&&line.final_grams!=null)final=number(line.final_grams,'Egreso / peso final');
       if(final===null&&!draft)fail('Falta el peso final. Guarda como pendiente o completa los pesos.');
       if(final!==null&&final>initial)fail('El peso final no puede superar al inicial. Registra una devolución o ajuste por separado.');
-      grams=final===null?0:Math.round((initial-final)*1000)/1000;
+      grams=final===null?0:decimalDifference(initial,final);
     }else grams=number(line.grams,'Gramos',0.001);
     const meters=line.meters===''||line.meters==null?null:number(line.meters,'Metros');
     items.push({lot_id:l.id,np,initial,final,grams,cost_kg:l.cost_kg,meters,notes:String(line.notes||'')});
-    grouped.set(l.id,(grouped.get(l.id)||0)+grams);
+    grouped.set(l.id,decimalSum([grouped.get(l.id)||0,grams]));
   }
   if(weighing&&peers.some(o=>o.date===d&&all('SELECT np FROM order_items WHERE order_id=?',o.id).some(i=>items.some(x=>x.np===i.np))))fail('Ya hay un registro de esta orden, fecha y NP. Revisa el registro existente.');
   if(!draft)for(const [id,grams] of grouped){const l=one('SELECT * FROM lots WHERE id=?',id);if(grams>0&&l.grams<grams)fail(`Existencia insuficiente en el lote ${l.lot}.`);}
@@ -299,7 +302,7 @@ function createOrder(b, existingId=null) {
   if(!draft)for(const [lotId,grams] of grouped){
     if(grams===0)continue;
     const l=one('SELECT * FROM lots WHERE id=?',lotId);
-    run('UPDATE lots SET grams=grams-? WHERE id=?',grams,lotId);
+    run('UPDATE lots SET grams=? WHERE id=?',decimalDifference(l.grams,grams),lotId);
     run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,?,?,?,?,?,?)',lotId,'out',grams,l.cost_kg,d,`Orden ${folio}`,id);
   }
 }
@@ -311,7 +314,7 @@ function cancelOrder(b) {
   if(o.status==='cancelled') fail('La orden ya está cancelada.');
   date(o.date); const d=date(today());
   for(const m of all("SELECT * FROM movements WHERE order_id=? AND type='out' AND reason NOT LIKE 'Preparación Pantone %'",o.id)) {
-    run('UPDATE lots SET grams=grams+? WHERE id=?',m.grams,m.lot_id);
+    run('UPDATE lots SET grams=? WHERE id=?',decimalSum([one('SELECT grams FROM lots WHERE id=?',m.lot_id).grams,m.grams]),m.lot_id);
     run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,?,?,?,?,?,?)',m.lot_id,'in',m.grams,m.cost_kg,d,`Cancelación ${o.folio}`,o.id);
   }
   run("UPDATE orders SET status='cancelled',ended_at=CASE WHEN started_at IS NOT NULL THEN coalesce(ended_at,?) ELSE ended_at END WHERE id=?",new Date().toISOString(),o.id);
@@ -327,10 +330,10 @@ function closeMonth(b) {
     const ms=all('SELECT * FROM movements WHERE lot_id=? AND date<?',l.id,month+'-32');
     let opening=0,incoming=0,outgoing=0;
     for(const m of ms) {
-      if(m.date.slice(0,7)<month || (m.type==='initial'&&m.date.slice(0,7)===month)) opening+=m.type==='out'?-m.grams:m.grams;
-      else if(m.type==='in') incoming+=m.grams;else if(m.type==='out') outgoing+=m.grams;
+      if(m.date.slice(0,7)<month || (m.type==='initial'&&m.date.slice(0,7)===month)) opening=decimalSum([opening,m.type==='out'?-m.grams:m.grams]);
+      else if(m.type==='in') incoming=decimalSum([incoming,m.grams]);else if(m.type==='out') outgoing=decimalSum([outgoing,m.grams]);
     }
-    return {lot_id:l.id,name:l.name,code:l.code,lot:l.lot,category:l.category,opening,incoming,outgoing,closing:opening+incoming-outgoing,cost_kg:l.cost_kg};
+    return {lot_id:l.id,name:l.name,code:l.code,lot:l.lot,category:l.category,opening,incoming,outgoing,closing:decimalSum([opening,incoming,-outgoing]),cost_kg:l.cost_kg};
   });
   run('INSERT INTO cuts(month,created_at,snapshot) VALUES(?,?,?)',month,new Date().toISOString(),JSON.stringify(rows));
 }

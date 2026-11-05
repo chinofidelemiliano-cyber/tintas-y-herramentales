@@ -1,3 +1,4 @@
+import {decimalDifference,decimalSum} from './quantity.js';
 // Legacy code was joined to the preceding name in the original PDF extraction.
 const aliases = { UIAPP50EP021ID: 'APP50EP021ID' };
 export function canonicalCode(code) {
@@ -11,7 +12,7 @@ export function splitContainers(grams, capacity = 4000) {
   const result = [];
   const full = Math.floor(grams / capacity);
   for (let i = 0; i < full; i++) result.push({ number: i + 1, grams: capacity, capacity, estimated: true });
-  const remainder = Math.round((grams - full * capacity) * 1000000) / 1000000;
+  const remainder = decimalDifference(grams,full*capacity);
   if (remainder > 0) result.push({ number: result.length + 1, grams: remainder, capacity, estimated: true });
   return result;
 }
@@ -22,7 +23,7 @@ export function groupLots(lots) {
     const code = canonicalCode(lot.code);
     if (!groups.has(code)) groups.set(code, { ...lot, code, grams: 0, lots: [] });
     const group = groups.get(code);
-    group.grams += lot.grams;
+    group.grams = decimalSum([group.grams,lot.grams]);
     group.lots.push(lot);
   }
   return [...groups.values()];
@@ -36,7 +37,7 @@ export function groupByProvider(lots) {
     if (!providers.has(key)) providers.set(key, { name, lots: [], grams: 0 });
     const provider = providers.get(key);
     provider.lots.push(lot);
-    provider.grams += lot.grams;
+    provider.grams = decimalSum([provider.grams,lot.grams]);
   }
   return [...providers.values()].sort((a, b) => a.name.localeCompare(b.name, 'es-MX')).map(p => ({...p, groups: groupLots(p.lots)}));
 }
