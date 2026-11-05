@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {mixtureRecipe} from './public/pantone-model.js';
 import {normalizePortalOrder} from './public/order-portal-model.js';
 import {randomBytes,createHash} from 'node:crypto';
 import {parseTeamsOrders} from './netlify/lib/teams-parser.mjs';
@@ -100,6 +101,20 @@ for(const [column,type] of Object.entries({started_at:'TEXT',ended_at:'TEXT',np:
 db.exec(`CREATE TABLE IF NOT EXISTS teams_connection(id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS teams_receipts(conversation_id TEXT NOT NULL,message_id TEXT NOT NULL,order_ids TEXT NOT NULL,PRIMARY KEY(conversation_id,message_id));`);
 for(const [column,type] of Object.entries({machine:"TEXT NOT NULL DEFAULT ''",queue_number:'INTEGER'}))if(!all('PRAGMA table_info(orders)').some(c=>c.name===column))db.exec(`ALTER TABLE orders ADD COLUMN ${column} ${type}`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS order_queue_number ON orders(queue_number) WHERE queue_number IS NOT NULL;CREATE TABLE IF NOT EXISTS order_portal_access(id INTEGER PRIMARY KEY,token_hash TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);CREATE TABLE IF NOT EXISTS order_portal_submissions(request_key TEXT PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),payload_hash TEXT NOT NULL);`);
+if(!all('PRAGMA table_info(orders)').some(c=>c.name==='ink_selections'))db.exec("ALTER TABLE orders ADD COLUMN ink_selections TEXT NOT NULL DEFAULT '[]'");
+db.exec(`CREATE TABLE IF NOT EXISTS pantone_requests(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES orders(id),slot INTEGER NOT NULL,pantone TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,prepared_at TEXT,output_grams REAL,output_lot_id INTEGER REFERENCES lots(id),UNIQUE(order_id,slot));CREATE TABLE IF NOT EXISTS pantone_ingredients(id INTEGER PRIMARY KEY,request_id INTEGER NOT NULL REFERENCES pantone_requests(id),lot_id INTEGER NOT NULL REFERENCES lots(id),grams REAL NOT NULL,cost_kg REAL NOT NULL);`);
+function completePantone(b){
+ const request=one('SELECT * FROM pantone_requests WHERE id=?',Number(b.id));if(!request)fail('Solicitud no encontrada.');if(request.status==='completed')return {id:request.id,output_lot_id:request.output_lot_id};
+ const o=one('SELECT * FROM orders WHERE id=?',request.order_id);if(o.status==='cancelled')fail('La orden está cancelada.');
+ const d=date(today()),recipe=mixtureRecipe(b);let totalCost=0;
+ const lots=recipe.ingredients.map(i=>{const lot=one("SELECT l.*,p.category FROM lots l JOIN products p ON p.id=l.product_id WHERE l.id=?",i.lot_id);if(!lot||lot.category!=='tinta'||lot.grams<i.grams)fail('Existencia insuficiente en un ingrediente.');totalCost+=i.grams*lot.cost_kg/1000;return {...i,cost_kg:lot.cost_kg};});
+ const code='MIX-PANTONE-'+request.id;if(one('SELECT id FROM products WHERE code=?',code))fail('Ya existe el código de esta mezcla.');
+ const costKg=totalCost/(recipe.outputGrams/1000),productId=Number(run("INSERT INTO products(code,name,kind,provider,category,minimum,cost_kg) VALUES(?,?,'Mezcla','Preparación interna','tinta',0,?)",code,'Pantone '+request.pantone,costKg).lastInsertRowid);
+ const outputLot=Number(run('INSERT INTO lots(product_id,lot,entry_date,shelf_days,cost_kg,grams) VALUES(?,?,?,?,?,?)',productId,'MIX-'+request.id+'-'+d,d,365,costKg,recipe.outputGrams).lastInsertRowid);
+ for(const i of lots){run('UPDATE lots SET grams=grams-? WHERE id=?',i.grams,i.lot_id);run('INSERT INTO pantone_ingredients(request_id,lot_id,grams,cost_kg) VALUES(?,?,?,?)',request.id,i.lot_id,i.grams,i.cost_kg);run("INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,'out',?,?,?,?,?)",i.lot_id,i.grams,i.cost_kg,d,'Preparación Pantone '+request.pantone+' · '+o.folio,null);}
+ run("INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,'in',?,?,?,?,?)",outputLot,recipe.outputGrams,costKg,d,'Mezcla Pantone '+request.pantone+' · '+o.folio,null);
+ run("UPDATE pantone_requests SET status='completed',prepared_at=?,output_grams=?,output_lot_id=? WHERE id=?",new Date().toISOString(),recipe.outputGrams,outputLot,request.id);return {id:request.id,output_lot_id:outputLot};
+}
 function manageOrderPortal(b){
  let access_key=null;
  if(b.operation==='configure'){access_key='op_'+randomBytes(32).toString('hex');run('INSERT INTO order_portal_access VALUES(1,?,1) ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,enabled=1',hashToken(access_key));}
@@ -110,6 +125,7 @@ function manageOrderPortal(b){
 function orderPortal(b){
  if(typeof b.access_key!=='string'||!/^op_[a-f0-9]{64}$/.test(b.access_key)||!one('SELECT id FROM order_portal_access WHERE id=1 AND enabled=1 AND token_hash=?',hashToken(b.access_key)))fail('El enlace fue desactivado o cambió. Solicita el enlace vigente.');
  const payload=b.payload||{};
+ if(payload.operation==='catalog')return {products:all("SELECT p.id,p.code,p.name,p.kind,p.provider,EXISTS(SELECT 1 FROM lots l WHERE l.product_id=p.id AND l.grams>0) AS available FROM products p WHERE p.category='tinta' ORDER BY p.name,p.code")};
  if(payload.operation==='list'){
   const cursor=Number(payload.after_sequence||0);if(!Number.isSafeInteger(cursor)||cursor<0)fail('Secuencia no válida.');
   const rows=all("SELECT id,queue_number,folio,np,product,client,pressman,machine,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes,status,started_at,ended_at,received_at FROM orders WHERE source='portal' AND queue_number>? AND (?=1 OR (status<>'cancelled' AND ended_at IS NULL)) ORDER BY queue_number LIMIT 51",cursor,payload.include_finished===true?1:0).map(({specifications,...o})=>({...o,colors:JSON.parse(specifications).colores||''}));
@@ -120,15 +136,17 @@ function orderPortal(b){
  const item=normalizePortalOrder(payload.order),signature=hashToken(JSON.stringify(item)),old=one('SELECT * FROM order_portal_submissions WHERE request_key=?',payload.request_key);
  if(old){if(old.payload_hash!==signature)fail('La captura ya fue enviada con otros datos. Recarga la lista antes de crear otra.');return {id:old.order_id,queue_number:one('SELECT queue_number FROM orders WHERE id=?',old.order_id).queue_number,duplicate:true};}
  if(one("SELECT id FROM orders WHERE source='portal' AND status<>'cancelled' AND upper(trim(folio))=upper(?) AND np=? AND scheduled_date=?",item.folio,item.np,item.scheduled_date))fail('Esta orden y NP ya están registrados para esa fecha. Revisa la lista.');
+ if(item.ink_selections?.length)item.colors=item.ink_selections.map(i=>{if(i.pantone)return 'Pantone '+i.pantone;const p=one("SELECT * FROM products WHERE id=? AND category='tinta'",i.product_id);if(!p)fail('Tinta del catálogo no encontrada.');return p.name+' ['+p.code+']';}).join(' · ');
  const n=one('SELECT coalesce(max(queue_number),0)+1 AS n FROM orders').n;
  const id=Number(run("INSERT INTO orders(folio,np,product,client,pressman,machine,date,status,source,received_at,queue_number,scheduled_date,scheduled_start,scheduled_end,pieces,planned_meters,specifications,notes) VALUES(?,?,?,?,?,?,?,'draft','portal',?,?,?,?,?,?,?,?,?)",item.folio,item.np,item.product,item.client,item.pressman,item.machine,today(),new Date().toISOString(),n,item.scheduled_date,item.scheduled_start,item.scheduled_end||null,item.pieces,item.meters,JSON.stringify({colores:item.colors}),item.notes).lastInsertRowid);
+ run('UPDATE orders SET ink_selections=? WHERE id=?',JSON.stringify(item.ink_selections||[]),id);for(const ink of item.ink_selections||[])if(ink.pantone)run('INSERT INTO pantone_requests(order_id,slot,pantone,created_at) VALUES(?,?,?,?)',id,ink.slot,ink.pantone,new Date().toISOString());
  run('INSERT INTO order_portal_submissions VALUES(?,?,?)',payload.request_key,id,signature);return {id,queue_number:n,duplicate:false};
 }
 const hashToken=token=>createHash('sha256').update(token).digest('hex');
 function orderClock(b){
  const row=one('SELECT * FROM orders WHERE id=?',Number(b.id));if(!row||row.status==='cancelled')fail('Orden no encontrada o cancelada.');
  if(b.operation==='start'){if(row.ended_at)fail('La orden ya finalizó.');run('UPDATE orders SET started_at=coalesce(started_at,?) WHERE id=?',new Date().toISOString(),row.id);}
- else if(b.operation==='finish'){if(!row.started_at)fail('Primero inicia la orden.');run('UPDATE orders SET ended_at=coalesce(ended_at,?) WHERE id=?',new Date().toISOString(),row.id);}
+ else if(b.operation==='finish'){if(one("SELECT id FROM pantone_requests WHERE order_id=? AND status='pending'",row.id))fail('Completa las solicitudes de Pantone antes de finalizar la preparación.');if(!row.started_at)fail('Primero inicia la orden.');run('UPDATE orders SET ended_at=coalesce(ended_at,?) WHERE id=?',new Date().toISOString(),row.id);}
  else fail('Acción de cronómetro no válida.');
  return one('SELECT id,started_at,ended_at FROM orders WHERE id=?',row.id);
 }
@@ -156,10 +174,11 @@ function receiveTeams(b,token){
 }
 function state() {
   return {incidents:all('SELECT * FROM incidents ORDER BY incident_number DESC').map(({before_photo,after_photo,...i})=>({...i,has_before:!!before_photo,has_after:!!after_photo,elapsed_seconds:incidentSeconds(i),folio:incidentFolio(i.incident_number)})),preparations:all('SELECT * FROM preparations ORDER BY date DESC,start_time DESC,id DESC'),today:today(),baseline:one("SELECT value FROM metadata WHERE key='baseline'").value,
+    pantone_requests:all('SELECT * FROM pantone_requests ORDER BY id').map(r=>({...r,ingredients:all('SELECT i.*,p.name,p.code,l.lot FROM pantone_ingredients i JOIN lots l ON l.id=i.lot_id JOIN products p ON p.id=l.product_id WHERE request_id=?',r.id)})),
     products:all('SELECT * FROM products ORDER BY name'),
     lots:all('SELECT l.*,p.name,p.code,p.kind,p.provider,p.category,p.minimum,p.maximum,p.container_grams FROM lots l JOIN products p ON p.id=l.product_id ORDER BY p.name,l.entry_date'),
     movements:all('SELECT m.*,p.name,p.code,l.lot FROM movements m JOIN lots l ON m.lot_id=l.id JOIN products p ON p.id=l.product_id ORDER BY m.date DESC,m.id DESC'),
-    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,specifications:JSON.parse(o.specifications||'{}'),lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
+    orders:all('SELECT * FROM orders ORDER BY date DESC,id DESC').map(o=>({...o,specifications:JSON.parse(o.specifications||'{}'),ink_selections:JSON.parse(o.ink_selections||'[]'),lines:all('SELECT i.*,p.name,p.code,l.lot FROM order_items i JOIN lots l ON i.lot_id=l.id JOIN products p ON l.product_id=p.id WHERE order_id=? ORDER BY i.id',o.id)})),
     cuts:all('SELECT * FROM cuts ORDER BY month DESC').map(c=>({...c,snapshot:JSON.parse(c.snapshot)}))};
 }
 function startIncident(b){
@@ -291,7 +310,7 @@ function cancelOrder(b) {
   if(!o) fail('Orden no encontrada.');
   if(o.status==='cancelled') fail('La orden ya está cancelada.');
   date(o.date); const d=date(today());
-  for(const m of all("SELECT * FROM movements WHERE order_id=? AND type='out'",o.id)) {
+  for(const m of all("SELECT * FROM movements WHERE order_id=? AND type='out' AND reason NOT LIKE 'Preparación Pantone %'",o.id)) {
     run('UPDATE lots SET grams=grams+? WHERE id=?',m.grams,m.lot_id);
     run('INSERT INTO movements(lot_id,type,grams,cost_kg,date,reason,order_id) VALUES(?,?,?,?,?,?,?)',m.lot_id,'in',m.grams,m.cost_kg,d,`Cancelación ${o.folio}`,o.id);
   }
@@ -328,7 +347,7 @@ const server=http.createServer(async(req,res)=>{
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>1000000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
       if(url.pathname==='/api/teams-orders'){const result=tx(()=>receiveTeams(b,req.headers['x-integration-key']));res.end(JSON.stringify({ok:true,...result}));return;}
-      const actions={'/api/order-portal':orderPortal,'/api/order-portal/manage':manageOrderPortal,'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/pantones/complete':completePantone,'/api/order-portal':orderPortal,'/api/order-portal/manage':manageOrderPortal,'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       const result=tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true,...(result||{})}));return;
     }
