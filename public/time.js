@@ -1,0 +1,13 @@
+export const defaultTimeSettings=Object.freeze({timezoneMode:'custom',timeZone:'America/Mexico_City',timeFormat:'24'});
+export function validTimeZone(value){if(typeof value!=='string'||value.length>100)return false;try{new Intl.DateTimeFormat('en',{timeZone:value}).format();return true;}catch{return false;}}
+export function detectedTimeZone(){try{const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;return validTimeZone(zone)?zone:defaultTimeSettings.timeZone;}catch{return defaultTimeSettings.timeZone;}}
+export function normalizeTimeSettings(value){return {timezoneMode:value?.timezoneMode==='automatic'?'automatic':'custom',timeZone:validTimeZone(value?.timeZone)?value.timeZone:defaultTimeSettings.timeZone,timeFormat:value?.timeFormat==='12'?'12':'24'};}
+let current={...defaultTimeSettings,language:'es'};
+export function setTimeSettings(value){current={...normalizeTimeSettings(value),language:value?.language==='en'?'en':'es'};return current;}
+export const getTimeSettings=()=>({...current});
+export const effectiveTimeZone=(value=current)=>value?.timezoneMode==='automatic'?detectedTimeZone():normalizeTimeSettings(value).timeZone;
+export function todayInZone(value=current,now=new Date()){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:effectiveTimeZone(value),year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now),get=type=>parts.find(p=>p.type===type).value;return get('year')+'-'+get('month')+'-'+get('day');}
+export function formatTimestamp(value,settings=current,options={dateStyle:'short',timeStyle:'medium'}){if(!value)return '—';const date=new Date(value);if(!Number.isFinite(date.getTime()))return '—';return new Intl.DateTimeFormat(settings.language==='en'?'en-US':'es-MX',{...options,timeZone:effectiveTimeZone(settings),hour12:settings.timeFormat==='12'}).format(date).replace(/[\u00a0\u202f]/g,' ');}
+export function timeZoneChoices(){const common=['America/Mexico_City','America/Tijuana','America/Hermosillo','America/Ciudad_Juarez','America/Chihuahua','America/Cancun','America/Monterrey','America/New_York','America/Los_Angeles','Europe/Madrid','UTC'];let all=[];try{all=Intl.supportedValuesOf('timeZone');}catch{}return [...new Set([...common,...all])].filter(validTimeZone);}
+
+export function formatWallTime(value,settings=current){if(!value)return '—';const match=String(value).match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);if(!match)return value;return new Intl.DateTimeFormat(settings.language==='en'?'en-US':'es-MX',{timeZone:'UTC',hour:'2-digit',minute:'2-digit',...(match[3]?{second:'2-digit'}:{}),hour12:settings.timeFormat==='12'}).format(new Date('2000-01-01T'+value+'Z')).replace(/[\u00a0\u202f]/g,' ');}

@@ -206,3 +206,7 @@ Tipo Base Agua / UV / Film por cada posición de tinta, con órdenes mixtas y op
 Metraje programado obligatorio para nuevas capturas, enlace privado de solo lectura por mes y comentarios que no registran consumos. Activación: [estado mensual y comentarios](docs/estado-mensual-y-comentarios.md); ejecutar `supabase/order-status-and-comments.sql` en proyectos existentes.
 
 La consulta mensual requiere además usuario y contraseña compartidos, validados en servidor con sesión de una hora. Para actualizar un proyecto existente ejecuta `supabase/order-status-login.sql` después de la migración de estado mensual. No se incluyen contraseñas en los archivos públicos del navegador.
+
+## Hora para el sitio y los PDF
+
+Detección de zona del dispositivo, zona personalizada y formato de 12/24 horas desde Configuración. Se guarda por perfil y el administrador publica la zona para las páginas compartidas. Activación: [configurar hora](docs/configurar-hora.md), con `supabase/time-settings.sql` como última migración.
