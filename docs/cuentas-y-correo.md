@@ -1,12 +1,14 @@
 # Cuentas, correo y sesiones
 
+El sitio ya no ofrece crear cuentas. Las cuentas se crean desde Supabase → Authentication → Users → Add user. Para cerrar también el registro directo por API, desactiva **Allow new users to sign up** en Authentication → Sign In / Providers. Este ajuste requiere acceso al panel de Supabase. Las secciones de verificación que siguen aplican a cuentas pendientes existentes.
+
 Los cambios del sitio necesitan activar también la migración de Supabase. No basta con publicar los archivos en Cloudflare.
 
 ## 1. Activar permisos y administración
 
 En Supabase → SQL Editor, ejecuta completo `supabase/accounts-and-sessions.sql`. Es una actualización del proyecto existente: conserva el inventario, el historial y los miembros anteriores. Para una instalación nueva, `supabase/setup.sql` ya incluye esta actualización.
 
-La cuenta verificada **chinofidelemiliano@gmail.com** se convierte en administradora únicamente si ya era miembro autorizado antes de ejecutar la actualización. Si no lo era: crea y verifica esa cuenta, y después ejecuta completo `supabase/authorize-owner.sql` desde SQL Editor. Este paso explícito evita otorgar administración a una persona que solamente escriba ese correo en el registro.
+La cuenta verificada **chinofidelemiliano@gmail.com** se convierte en administradora únicamente si ya era miembro autorizado antes de ejecutar la actualización. Si no lo era: crea esa cuenta desde el panel de Supabase y verifica su correo, y después ejecuta completo `supabase/authorize-owner.sql` desde SQL Editor. Este paso explícito evita otorgar administración a una persona que solamente escriba ese correo en el registro.
 
 Al entrar con la cuenta administradora aparecerá **Cuentas y seguridad**. Marca los apartados permitidos y pulsa **Autorizar acceso**. También puedes actualizar permisos o retirarlos. Una cuenta nueva permanece sin datos aunque ya haya verificado su correo. Los permisos se comprueban en Supabase además de limitar el menú. Los miembros anteriores conservan acceso a los apartados habituales; solo la cuenta administradora puede aprobar usuarios o gestionar el enlace de captura compartida.
 
@@ -14,7 +16,7 @@ Los permisos son por apartado. Algunos incluyen información relacionada necesar
 
 ## 2. Enviar códigos desde tu Gmail
 
-En Supabase → Authentication → Sign In / Providers → Email, habilita el registro por correo y **Confirm email**. No desactives la confirmación.
+En Supabase → Authentication → Sign In / Providers → Email, habilita el acceso por correo y **Confirm email**, manteniendo desactivado el registro público. No desactives la confirmación.
 
 En Authentication → Email → SMTP Settings, configura **Custom SMTP**:
 
@@ -32,11 +34,11 @@ En tu cuenta de Google activa la verificación en dos pasos y genera una contras
 En Authentication → Email Templates → Confirm signup, incluye el código `{{ .Token }}` en el mensaje, por ejemplo:
 
 > Tu código de verificación es: {{ .Token }}
-> Escríbelo en la pantalla Crear cuenta. Después, el administrador debe autorizar tus permisos.
+> Escríbelo en la pantalla de verificación. Después, el administrador debe autorizar tus permisos.
 
 Puedes configurar una expiración de 10 minutos en las opciones de Email OTP. El sitio permite códigos de 6 a 8 dígitos y limita el botón de reenvío durante 60 segundos; Supabase aplica además sus propios límites. El envío real depende de que guardes y pruebes esta configuración SMTP. El sitio no contiene credenciales de correo.
 
-Prueba con una cuenta nueva: Crear cuenta → recibir código → Verificar código → Pendiente de autorización. Desde tu cuenta administradora, concede solo los apartados necesarios y comprueba el acceso. Revisa correo no deseado si no llega el mensaje.
+Para una cuenta existente pendiente: recibir código → Verificar código → Pendiente de autorización. Desde tu cuenta administradora, concede solo los apartados necesarios y comprueba el acceso. Revisa correo no deseado si no llega el mensaje.
 
 ## 3. Dispositivos y sesiones
 

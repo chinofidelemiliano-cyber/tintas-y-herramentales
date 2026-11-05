@@ -187,4 +187,4 @@ El núcleo probado está en `_shared/push-core.mjs`; `npm run build:push` genera
 
 ## Cuentas y seguridad
 
-Registro con verificación por código, autorización de permisos por administrador y registro de inicios de sesión. Para activar el acceso en Supabase y el envío desde Gmail sigue [cuentas y correo](docs/cuentas-y-correo.md). La actualización para proyectos existentes es `supabase/accounts-and-sessions.sql`; el SMTP se configura únicamente en Supabase.
+Inicio de sesión para cuentas creadas por el administrador, autorización de permisos y registro de inicios de sesión. Para activar el acceso en Supabase y el envío desde Gmail sigue [cuentas y correo](docs/cuentas-y-correo.md). La actualización para proyectos existentes es `supabase/accounts-and-sessions.sql`; el SMTP se configura únicamente en Supabase.

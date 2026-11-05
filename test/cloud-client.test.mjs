@@ -28,7 +28,7 @@ test('cloud connector requires login and uses only public configuration plus use
  };
  const {getCloud}=await import('../public/cloud-client.js?test=connector');const cloud=await getCloud();
  assert.equal(cloud.hasSession(),false);await assert.rejects(cloud.state(),/Inicia sesión/);
- await cloud.signUp('test@example.invalid','fake-test-password','Nombre');assert.equal(cloud.hasSession(),false);await cloud.resendSignup('test@example.invalid');assert.equal(cloud.hasSession(),false);await cloud.verifySignup('test@example.invalid','123456');assert.equal(cloud.hasSession(),true);assert.deepEqual(await cloud.accountAccess(),{approved:false,permissions:[]});assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/auth/v1/verify')).options.body),{email:'test@example.invalid',token:'123456',type:'signup'});
+ await cloud.resendSignup('test@example.invalid');assert.equal(cloud.hasSession(),false);await cloud.verifySignup('test@example.invalid','123456');assert.equal(cloud.hasSession(),true);assert.deepEqual(await cloud.accountAccess(),{approved:false,permissions:[]});assert.deepEqual(JSON.parse(calls.find(c=>c.url.endsWith('/auth/v1/verify')).options.body),{email:'test@example.invalid',token:'123456',type:'signup'});
  await cloud.signIn('test@example.invalid','fake-test-password');assert.equal(cloud.hasSession(),true);
  assert.deepEqual(await cloud.state(),{products:[],lots:[]});await cloud.action('movements',{grams:10});
  const action=calls.find(c=>c.url.endsWith('/prisma_action'));assert.equal(action.options.headers.Authorization,'Bearer fake-user-access-token');assert.equal(action.options.headers.apikey,'sb_publishable_test_public_config');assert.deepEqual(JSON.parse(action.options.body),{operation:'movements',payload:{grams:10}});
