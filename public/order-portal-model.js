@@ -1,3 +1,4 @@
+import {normalizeCapturePlanning} from './capture-planning.js';
 import {normalizeOperatorAssignment} from './operator-model.js';
 import {decimalCeilRatio,decimalMultiply} from './quantity.js';
 import {normalizeProductionPlan} from './production-session-model.js';
@@ -21,6 +22,6 @@ export function normalizePortalOrder(value){
  }
  for(const key of ['die_id','crease_id']){const id=value?.[key];if(id!==undefined){result[key]=id===''||id==null?null:Number(id);if(result[key]!==null&&(!Number.isSafeInteger(result[key])||result[key]<=0))throw Error('Herramental no válido.');}}
  result.production_plan=normalizeProductionPlan(value);if(decimalCeilRatio(result.meters,result.production_plan.reel_meters)>10000)throw Error('Máximo 10,000 bobinas por orden.');if(result.production_plan.has_crease==='no')result.crease_id=null;
- Object.assign(result,normalizeOperatorAssignment(value));const requested=Number(value.requested_thousands??(value.pieces!=null&&value.pieces!==''?decimalMultiply(value.pieces,.001):NaN));if(!Number.isFinite(requested)||requested<=0||requested>1e9)throw Error('Captura los millares solicitados.');result.requested_thousands=requested;result.pieces=decimalMultiply(requested,1000);result.production_plan.requested_thousands=requested;Object.assign(result,result.production_plan);
+ Object.assign(result,normalizeOperatorAssignment(value));const requested=Number(value.requested_thousands??(value.pieces!=null&&value.pieces!==''?decimalMultiply(value.pieces,.001):NaN));if(!Number.isFinite(requested)||requested<=0||requested>1e9)throw Error('Captura los millares solicitados.');result.requested_thousands=requested;result.pieces=decimalMultiply(requested,1000);result.production_plan.requested_thousands=requested;if(Number(value.capture_version)===2)Object.assign(result.production_plan,normalizeCapturePlanning(value));Object.assign(result,result.production_plan);
  return result;
 }

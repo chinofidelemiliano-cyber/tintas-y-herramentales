@@ -44,3 +44,17 @@ El administrador puede clasificar causa, impacto y responsable en el registro pr
 ## Verificación
 
 Las pruebas locales cubren cronómetros independientes, exclusión de paros, espera sin tiempo muerto, cierre por millares y justificación, separación de perfiles, historial privado, documentos conjuntos y ZIP. La migración se comprueba con un PostgreSQL embebido, incluyendo permisos e idempotencia. La interfaz se verifica en Chromium; el dictado de prueba es simulado y no acredita permisos ni disponibilidad del micrófono de un teléfono real.
+
+## Captura completa y permisos del propietario
+
+Actualización posterior: `supabase/capture-order-details.sql` exige para nuevas capturas millares, medidas de etiqueta en mm, fecha solicitada, prioridad inicial, categoría, scrap objetivo, material, empaque, etiquetas por rollo, diámetros y material del centro, posiciones/vueltas de salida, rollos por caja y tiempo esperado de rebobinado. Una fila por bobina asignada registra identificación, lote, ancho y metros disponibles, suficientes para su metraje programado. Los totales de piezas y cajas se calculan con esos datos. Los campos de texto que no correspondan admiten “No aplica”. Los identificadores de bobinas son captura manual; no descuentan inventario de materia prima.
+
+La planeación pasa a las hojas y sus PDF como datos de solo lectura. Los operadores registran resultados, metros reales, millares finales, observaciones y firmas. Las órdenes anteriores conservan sus datos; no se inventan medidas o bobinas faltantes.
+
+La prioridad visible se calcula al consultar o exportar, con la zona horaria configurada: Alta a tres días de la fecha solicitada, Urgente a un día (incluye el día solicitado) y Vencida al día siguiente. No reduce la prioridad inicial elegida. No requiere tareas programadas y no cambia el consecutivo de captura.
+
+Desde **Órdenes para prensistas** se filtra por Julio, Manuel, Aurora o Lorena. La cuenta administradora puede consultar hojas de todos los perfiles. Los operadores conservan su restricción de área y asignación; no se divulgan contraseñas ni se simulan sus sesiones.
+
+`supabase/owner-full-access.sql` concede permisos completos y administración únicamente a la cuenta existente y verificada `chinofidelemiliano@gmail.com`, ejecutado por el propietario del proyecto desde SQL Editor. No crea cuentas, no verifica correos por su cuenta ni ofrece una RPC para autoasignarse permisos. Después de ejecutarlo, cerrar sesión y volver a entrar.
+
+Para evitar errores por copiar fragmentos o escapes Markdown, **Configuración → Activación de órdenes y acceso del propietario** enlaza `/activar-produccion.html`. Permite descargar `/activar-produccion.sql`, que reúne historial/rebobinado, captura completa y concesión de acceso del propietario. Generar el archivo con `node scripts/build-order-activation.mjs` cuando se modifique alguna de esas migraciones. Seleccionar todo el archivo descargado y ejecutarlo en una consulta nueva; `detail:=` es una instrucción interna de una función, no una consulta SQL independiente. No usar `setup.sql` para actualizar una base en producción.

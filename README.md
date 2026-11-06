@@ -238,3 +238,9 @@ Los enlaces de prensistas y rebobinado piden usuario y contraseña. Captura asig
 Historial privado de preparación, prensistas y rebobinado, con filtros por responsable y día/semana/mes, impresión conjunta, individual y PDF separados en ZIP. Logo en cada orden. Rebobinado registra tiempos por orden y rollo, cierre por millares reales con justificación de faltantes, espera de otra bobina separada del tiempo muerto e incidencias dictadas con PDF para muestras físicas. Producción agrega paros por falta de material/insumos.
 
 Activar una base existente con perfiles mediante `supabase/work-history-rewind.sql`. La migración acumulada `supabase/press-sheets.sql` también la incluye. Ver [activación y funcionamiento](docs/historial-y-rebobinado.md), incluidas las limitaciones del dictado y los registros históricos sin cronómetro.
+
+## Captura completa y prioridad automática
+
+La captura requiere medidas en mm, millares, etiquetas por rollo, empaque, fecha solicitada, prioridad y bobinas de materia prima asignadas. Los datos planeados se consultan sin recaptura en las hojas/PDF. La prioridad sube a Alta a 3 días, Urgente a 1 día y Vencida al superar la fecha solicitada, sin bajar la prioridad inicial.
+
+Activación y acceso total de la cuenta propietaria verificada: **Configuración → Activación de órdenes** (`/activar-produccion.html`). Descargar el archivo SQL completo, ejecutarlo íntegramente en Supabase y volver a iniciar sesión. Ver [funcionamiento, permisos y actualización](docs/historial-y-rebobinado.md#captura-completa-y-permisos-del-propietario). El archivo público se genera con `node scripts/build-order-activation.mjs`; no contiene contraseñas ni claves.
