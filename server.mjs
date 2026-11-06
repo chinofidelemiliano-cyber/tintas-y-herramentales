@@ -1,3 +1,4 @@
+import {pressSheetSnapshot,normalizePressFields} from './public/press-sheet-model.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {validTimeZone,todayInZone,normalizeTimeSettings,effectiveTimeZone} from './public/time.js';
 import {orderMonth,publicOrderStatus} from './public/order-status-model.js';
@@ -171,12 +172,18 @@ function orderPortal(b){
  run('INSERT INTO order_portal_submissions VALUES(?,?,?)',payload.request_key,id,signature);return {id,queue_number:n,duplicate:false};
 }
 const hashToken=token=>createHash('sha256').update(token).digest('hex');
+db.exec(`CREATE TABLE IF NOT EXISTS press_sheets(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id),profile_id TEXT NOT NULL,access_key TEXT NOT NULL UNIQUE,source TEXT NOT NULL,fields TEXT NOT NULL DEFAULT '{}',version INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);`);
+function pressSheets(b){
+ if(b.operation==='list')return {sheets:all("SELECT * FROM press_sheets WHERE profile_id='local' ORDER BY id DESC").map(row=>({...row,source:{...JSON.parse(row.source),reportLogo:undefined,colors:undefined},fields:undefined}))};
+ if(b.operation!=='generate')fail('Acción no válida.');const order=one('SELECT * FROM orders WHERE id=?',Number(b.order_id));if(!order||!order.ended_at||order.status==='cancelled')fail('Primero finaliza la preparación de la orden.');let row=one('SELECT * FROM press_sheets WHERE order_id=?',order.id);if(!row){const snapshot=pressSheetSnapshot({...order,specifications:JSON.parse(order.specifications||'{}'),ink_selections:JSON.parse(order.ink_selections||'[]')},all('SELECT * FROM products'),{...(b.profile||{}),timeZone:requestTime.getStore()?.timeZone||sharedTime().timeZone}),now=new Date().toISOString();const id=Number(run("INSERT INTO press_sheets(order_id,profile_id,access_key,source,created_at,updated_at) VALUES(?,'local',?,?,?,?)",order.id,'ps_'+randomBytes(32).toString('hex'),JSON.stringify(snapshot),now,now).lastInsertRowid);row=one('SELECT * FROM press_sheets WHERE id=?',id);}return {...row,source:JSON.parse(row.source),fields:JSON.parse(row.fields)};
+}
+function pressSheetPublic(b){if(!/^ps_[a-f0-9]{64}$/.test(b.access_key||''))fail('Enlace no autorizado.');let row=one('SELECT * FROM press_sheets WHERE access_key=?',b.access_key);if(!row)fail('Enlace no autorizado.');if(b.operation==='save'){const order=one('SELECT status FROM orders WHERE id=?',row.order_id);if(order?.status==='cancelled')fail('La orden fue cancelada. Solo se puede consultar.');if(Number(b.version)!==row.version)fail('Otra persona actualizó el formato. Recarga antes de guardar.');const fields=normalizePressFields(b.fields);run('UPDATE press_sheets SET fields=?,version=version+1,updated_at=? WHERE id=?',JSON.stringify(fields),new Date().toISOString(),row.id);row=one('SELECT * FROM press_sheets WHERE id=?',row.id);}else if(b.operation!=='get')fail('Acción no válida.');return {id:row.id,source:JSON.parse(row.source),fields:JSON.parse(row.fields),version:row.version,created_at:row.created_at,updated_at:row.updated_at,cancelled:one('SELECT status FROM orders WHERE id=?',row.order_id)?.status==='cancelled'};}
 function orderClock(b){
  const row=one('SELECT * FROM orders WHERE id=?',Number(b.id));if(!row||row.status==='cancelled')fail('Orden no encontrada o cancelada.');
  if(b.operation==='start'){if(row.ended_at)fail('La orden ya finalizó.');run('UPDATE orders SET started_at=coalesce(started_at,?) WHERE id=?',new Date().toISOString(),row.id);}
  else if(b.operation==='finish'){if(one("SELECT id FROM pantone_requests WHERE order_id=? AND status='pending'",row.id))fail('Completa las solicitudes de Pantone antes de finalizar la preparación.');if(!row.started_at)fail('Primero inicia la orden.');run('UPDATE orders SET ended_at=coalesce(ended_at,?) WHERE id=?',new Date().toISOString(),row.id);}
  else fail('Acción de cronómetro no válida.');
- return one('SELECT id,started_at,ended_at FROM orders WHERE id=?',row.id);
+ return {...one('SELECT id,started_at,ended_at FROM orders WHERE id=?',row.id),...(b.operation==='finish'?{press_sheet:pressSheets({operation:'generate',order_id:row.id,profile:b.profile})}:{})};
 }
 function teamsConnection(b){
  let token=null;
@@ -376,7 +383,7 @@ const server=http.createServer((req,res)=>requestTime.run({timeZone:validTimeZon
       let raw='';for await(const chunk of req) {raw+=chunk;if(raw.length>1000000) fail('Solicitud demasiado grande.');}
       const b=JSON.parse(raw||'{}');
       if(url.pathname==='/api/teams-orders'){const result=tx(()=>receiveTeams(b,req.headers['x-integration-key']));res.end(JSON.stringify({ok:true,...result}));return;}
-      const actions={'/api/site-time':siteTime,'/api/order-status/login':statusLogin,'/api/order-status/logout':statusLogout,'/api/order-comments':orderComments,'/api/order-status/manage':manageOrderStatus,'/api/order-status':orderStatusReport,'/api/order-ink-options':orderInkOptions,'/api/pantones/complete':completePantone,'/api/order-portal':orderPortal,'/api/order-portal/manage':manageOrderPortal,'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
+      const actions={'/api/press-sheets':pressSheets,'/api/press-sheet':pressSheetPublic,'/api/site-time':siteTime,'/api/order-status/login':statusLogin,'/api/order-status/logout':statusLogout,'/api/order-comments':orderComments,'/api/order-status/manage':manageOrderStatus,'/api/order-status':orderStatusReport,'/api/order-ink-options':orderInkOptions,'/api/pantones/complete':completePantone,'/api/order-portal':orderPortal,'/api/order-portal/manage':manageOrderPortal,'/api/orders/clock':orderClock,'/api/teams/connection':teamsConnection,'/api/incidents/start':startIncident,'/api/incidents':saveIncident,'/api/preparations':savePreparation,'/api/movements':move,'/api/products':product,'/api/orders':createOrder,'/api/orders/update':updateOrder,'/api/orders/cancel':cancelOrder,'/api/cuts':closeMonth};
       if(!actions[url.pathname]) fail('Ruta no encontrada.');
       const result=tx(()=>actions[url.pathname](b));res.end(JSON.stringify({ok:true,...(result||{})}));return;
     }

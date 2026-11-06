@@ -218,3 +218,7 @@ Fotos y datos con respaldo local por perfil, sincronización automática y cron�
 ## Órdenes de producción agrupadas
 
 El historial muestra una fila por folio dentro del mes seleccionado, con consumo confirmado, tintas y metros contados una vez por registro. Abre la orden para consultar lotes, pesajes, consumos y comentarios; si el folio tiene varios registros, se conserva el acceso individual. Buscar una tinta conserva el detalle completo de la orden. Los PDF incluyen resumen por folio y bloques de consumos agrupados que comparten página cuando caben. Los registros cancelados se conservan y no se suman al consumo activo. No requiere actualizar Supabase.
+
+## Hojas para prensistas
+
+Al finalizar preparación se genera una hoja editable e imprimible, con datos de la orden y campos para prensa, materiales, rebobinado y resultados. Se conserva por perfil en **Órdenes para prensistas**, sin confirmar consumos. Documentación y activación posterior: [hojas para prensistas](docs/hojas-prensistas.md). Migración para proyectos existentes: `supabase/press-sheets.sql`.
