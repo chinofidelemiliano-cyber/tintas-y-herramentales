@@ -35,3 +35,7 @@ Cada enlace contiene una clave exclusiva para esa hoja y etapa, sin abrir el inv
 Después, recargar el sitio y abrir **Órdenes para prensistas** con la cuenta administradora para recuperar las órdenes anteriores. Las migraciones se pueden repetir sin regenerar claves ni perder campos o avances.
 
 El servidor local crea las columnas automáticamente y recupera los registros al abrir el apartado. La validación local no ejecuta SQL en la cuenta remota: esa activación requiere acceso administrativo a Supabase.
+
+## Actualización: producción interactiva
+
+La capacidad por bobina ahora se indica en la captura (1,500 m queda como referencia para registros anteriores). Las órdenes finalizadas se ocultan del enlace de prensistas; se incorporan relojes por bobina, metros reales, justificaciones y paros relacionados con incidencias. Activación y acceso a la bitácora privada: [producción interactiva](produccion-interactiva.md), con `supabase/production-sessions.sql` como última migración.

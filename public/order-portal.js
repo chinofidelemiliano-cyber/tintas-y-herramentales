@@ -32,15 +32,15 @@ function renderToolCatalog(catalog){
 function saveDraft(){try{sessionStorage.setItem(storageKey,JSON.stringify({fields:Object.fromEntries(new FormData($('#order-form'))),ink_selections:picker?.value(),pending}));}catch{}}
 async function initialize(){
  if(!/^op_[a-f0-9]{64}$/.test(accessKey))throw Error('Abre el enlace completo de captura que te compartió el administrador.');
- await refresh();const catalog=await api({operation:'catalog'});picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products,catalog.ink_options||[]);renderToolCatalog(catalog);$('#workspace').hidden=false;
+ await refresh();const catalog=await api({operation:'catalog'});if(catalog.production_workflow_version!==3)throw Error('Falta activar la planeación y los tiempos: el administrador debe ejecutar supabase/production-sessions.sql en Supabase y recargar esta página.');picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products,catalog.ink_options||[]);renderToolCatalog(catalog);$('#workspace').hidden=false;
  const form=$('#order-form');form.elements.scheduled_date.value=todayInZone();
  try{const saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');if(saved){for(const [key,value]of Object.entries(saved.fields||{}))if(form.elements.namedItem(key))form.elements.namedItem(key).value=value;picker.restore((saved.ink_selections||[]).map(i=>({...i,ink_family:i.ink_family||saved.fields?.ink_family}))); pending=saved.pending;}}catch{}
- form.addEventListener('input',saveDraft);form.addEventListener('change',saveDraft);
+ const updateCrease=()=>{form.elements.crease_id.required=form.elements.has_crease.value==='yes';form.elements.crease_id.disabled=form.elements.has_crease.value!=='yes';if(form.elements.has_crease.value==='no')form.elements.crease_id.value='';};form.elements.has_crease.onchange=updateCrease;updateCrease();form.addEventListener('input',saveDraft);form.addEventListener('change',saveDraft);
  form.onsubmit=async event=>{
   event.preventDefault();$('#form-error').hidden=true;$('#form-success').hidden=true;let order;
   try{order=normalizePortalOrder({...Object.fromEntries(new FormData(form)),ink_selections:picker.value()});}catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;return;}
   if(!pending||JSON.stringify(pending.order)!==JSON.stringify(order))pending={request_key:crypto.randomUUID(),order};saveDraft();$('#order-fields').disabled=true;
-  try{const result=await api({operation:'submit',...pending});pending=null;const keep={pressman:order.pressman,machine:order.machine,scheduled_date:order.scheduled_date};form.reset();for(const [key,value]of Object.entries(keep))form.elements.namedItem(key).value=value;picker.reset();try{sessionStorage.removeItem(storageKey);}catch{}
+  try{const result=await api({operation:'submit',...pending});pending=null;const keep={pressman:order.pressman,machine:order.machine,scheduled_date:order.scheduled_date};form.reset();for(const [key,value]of Object.entries(keep))form.elements.namedItem(key).value=value;picker.reset();updateCrease();try{sessionStorage.removeItem(storageKey);}catch{}
    $('#form-success').textContent=`Orden ${order.folio} registrada en la secuencia #${String(result.queue_number).padStart(3,'0')}. Ya está disponible en planta.`;$('#form-success').hidden=false;
    await refresh().catch(()=>{});
   }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;}finally{$('#order-fields').disabled=false;}

@@ -1,3 +1,5 @@
+import {decimalCeilRatio} from './quantity.js';
+import {normalizeProductionPlan} from './production-session-model.js';
 import {inkFamilies} from './order-ink-options.js';
 import {incidentMachines} from './incident-model.js';
 export function normalizePortalOrder(value){
@@ -17,5 +19,6 @@ export function normalizePortalOrder(value){
   if(!result.ink_selections.length&&!result.colors)throw Error('Selecciona al menos un color.');
  }
  for(const key of ['die_id','crease_id']){const id=value?.[key];if(id!==undefined){result[key]=id===''||id==null?null:Number(id);if(result[key]!==null&&(!Number.isSafeInteger(result[key])||result[key]<=0))throw Error('Herramental no válido.');}}
+ result.production_plan=normalizeProductionPlan(value);if(decimalCeilRatio(result.meters,result.production_plan.reel_meters)>10000)throw Error('Máximo 10,000 bobinas por orden.');if(result.production_plan.has_crease==='no')result.crease_id=null;
  return result;
 }
