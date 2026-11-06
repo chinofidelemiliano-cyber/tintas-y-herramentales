@@ -1,0 +1,34 @@
+[
+  {
+    "username": "JRU",
+    "name": "Julio Rocha",
+    "stage": "production",
+    "salt": "58c6de6b7b081e6ee87e6ae7d8c5cb30",
+    "password_hash": "36eb04cc1da2cf6500d54bf93e230be2eeca775725601d9b3964c4b0a19ebf76",
+    "bcrypt_hash": "$2a$12$uyHCKzRMRvRRH9pcgiVW8O8tp2z8pWakffMQiwvxg33zKSAWTEPBy"
+  },
+  {
+    "username": "MCR",
+    "name": "Manuel Carrillo",
+    "stage": "production",
+    "salt": "d5eea4187b262bc93edfb69e55f5fd52",
+    "password_hash": "5374835fdaf18a78139b12b4e54fb43bbeb115a1e155fefd9ff35c6f25e1eeaf",
+    "bcrypt_hash": "$2a$12$blAvb2r5O.ARbyiZgcn.pO5lg/nGsOYkglX3CfyKLlHdi.iqApfS."
+  },
+  {
+    "username": "AA",
+    "name": "Aurora Arroyo",
+    "stage": "rewind",
+    "salt": "0408f151222335ff9c650ed66f9430b3",
+    "password_hash": "bacaa27d703ed69ca4985856a04a67f19cfddb8f3f684505b7b44e5c4a60a429",
+    "bcrypt_hash": "$2a$12$jgik1gVRsD.X8lKQBbXjRuagsv7vffJ/ZfHOyfSsWdImCi25.i9Be"
+  },
+  {
+    "username": "LL",
+    "name": "Lorena Leticia",
+    "stage": "rewind",
+    "salt": "1d461cabdd45045a27eb2b1b59b3532e",
+    "password_hash": "7c06f6578a98ed9eec4fdfac4c4547a528d1f611574fe388ea49bbc3a3dd4623",
+    "bcrypt_hash": "$2a$12$C9Ru1EyRCO9b1NnXAsBt2u7mmxEhBPLwQ./E.PvtOtl7GqrSo0htO"
+  }
+]

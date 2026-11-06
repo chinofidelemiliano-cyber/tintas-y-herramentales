@@ -40,3 +40,7 @@ La bitácora permite filtrar día y nombre capturado, consultar inicio/fin gener
 Las referencias proporcionadas son aproximadamente **3 visitas al baño de 10 minutos** y **45 minutos de comida por día**. Se muestran como contexto; no generan sanciones, descuentos ni límites automáticos. Los resúmenes diarios respetan la zona horaria configurada y recortan los intervalos que cruzan medianoche. El conteo de visitas corresponde al día de inicio del paro. Las categorías pueden coincidir en tiempo, mientras que el neto descuenta su unión. El nombre del prensista procede de la captura; el enlace compartido no verifica su identidad.
 
 Estas operaciones no descuentan tinta ni cambian los consumos: ese flujo continúa en Órdenes de producción.
+
+## Acceso por perfil del personal
+
+La actualización de [perfiles del personal](perfiles-personal.md) añade usuario y contraseña a los enlaces, asignación de prensista/rebobinado desde captura y responsables verificados por bobina. Aplicar `supabase/operator-profiles.sql` como última migración. No concede a los trabajadores acceso al inventario ni a esta bitácora privada.

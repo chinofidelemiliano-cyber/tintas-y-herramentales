@@ -228,3 +228,7 @@ Las hojas se separan en **Producción** y **Rebobinado**, con enlaces y PDF por 
 ## Producción interactiva y tiempos privados
 
 Planeación obligatoria desde captura (metros por bobina, tiempos esperados, suaje/pleca y acabado), formato en milímetros, inicio de producción, reloj neto por bobina, metraje real y justificación de faltantes. Las órdenes finalizadas se conservan en el perfil y se ocultan del enlace del prensista. Los paros manuales y de incidencias quedan en una bitácora con permiso independiente, sin exposición en enlaces/PDF públicos. Activación: [producción interactiva](docs/produccion-interactiva.md); ejecutar `supabase/production-sessions.sql` después de las migraciones de hojas anteriores.
+
+## Perfiles del personal
+
+Los enlaces de prensistas y rebobinado piden usuario y contraseña. Captura asigna a Julio Rocha o Manuel Carrillo y a Aurora Arroyo o Lorena Leticia; el servidor separa las órdenes por perfil y registra al responsable de cada bobina. El propietario conserva su vista completa. Activación: [perfiles del personal](docs/perfiles-personal.md), aplicando `supabase/operator-profiles.sql` después de producción interactiva.
