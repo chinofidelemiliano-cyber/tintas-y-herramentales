@@ -222,3 +222,5 @@ El historial muestra una fila por folio dentro del mes seleccionado, con consumo
 ## Hojas para prensistas
 
 Al finalizar preparación se genera una hoja editable e imprimible, con datos de la orden y campos para prensa, materiales, rebobinado y resultados. Se conserva por perfil en **Órdenes para prensistas**, sin confirmar consumos. Documentación y activación posterior: [hojas para prensistas](docs/hojas-prensistas.md). Migración para proyectos existentes: `supabase/press-sheets.sql`.
+
+Las hojas se separan en **Producción** y **Rebobinado**, con enlaces y PDF por etapa. El metraje se divide en bobinas de hasta 1,500 m; completar la primera habilita rebobinado mientras continúa producción. La cuenta administradora recupera las órdenes anteriores al abrir el apartado. Para actualizar hojas ya activadas: `supabase/production-rewinding.sql`; si todavía no se activaron, `supabase/press-sheets.sql` incluye todo. Consulta [el flujo por bobinas](docs/hojas-prensistas.md).

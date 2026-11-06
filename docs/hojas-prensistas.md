@@ -1,17 +1,37 @@
-# Hojas para prensistas
+# Producción y rebobinado por bobinas
 
-Al finalizar la preparación se crea una hoja por orden y se abre su página independiente. Si el navegador bloquea la ventana, se puede abrir desde **Órdenes para prensistas**. Esta sección reúne las hojas del perfil por mes de creación y permite copiar el enlace para el prensista.
+**Órdenes para prensistas** tiene dos bloques: producción y rebobinado/empaque. El perfil conserva las hojas, los campos capturados y las fechas de finalización de cada bobina. Se puede filtrar por mes de la orden o buscar su folio, NP o producto.
 
-Los datos conocidos de la orden se conservan como referencia: folio, NP, producto, máquina, metraje programado, herramentales y tintas preparadas. Los campos restantes quedan disponibles para completar material, bobinas, tiempos de prensa, rebobinado, empaque, resultados y firmas. Las órdenes preparadas anteriormente pueden generar su hoja desde el detalle; no se crean hojas históricas en bloque.
+Al finalizar preparación se genera una sola hoja por orden. Al abrir el apartado con la cuenta administradora también se recuperan las órdenes ya preparadas y los registros confirmados anteriores que no tenían hoja. Los formatos existentes conservan sus claves, campos y avances; no se vuelven a crear. Las órdenes pendientes de preparación y las canceladas no se importan. No se inventan avances de producción para registros históricos.
 
-El prensista puede guardar los campos capturados, imprimir o descargar el PDF. La hoja normal ocupa una página A4; los textos extensos se conservan completos en un anexo del PDF. Guardar estos datos no descuenta inventario ni confirma consumos: estos se siguen registrando en el flujo de producción existente. Una orden cancelada deja su hoja en consulta.
+## Enlaces generales
 
-Cada enlace contiene una clave exclusiva para consultar y completar esa hoja, sin abrir el inventario. Debe compartirse únicamente con quienes necesiten trabajar en ella. Los cambios simultáneos se detectan mediante la versión guardada para evitar sobrescrituras.
+El perfil ofrece **Copiar enlace general de prensistas** y **Copiar enlace general de rebobinado**. Se comparten una sola vez con cada área. No requieren registrar usuarios y muestran únicamente las hojas del perfil propietario. Producción recibe automáticamente las nuevas hojas; rebobinado recibe la orden al terminar su primera bobina. Las listas se actualizan cada 15 segundos y permiten abrir el detalle de la etapa y volver a la lista. Quien reciba un enlace general puede abrir y completar las hojas de esa etapa: compartirlo únicamente con el área correspondiente.
 
-## Activación posterior en Supabase
+## Producción
 
-Para un proyecto existente, la migración preparada es `supabase/press-sheets.sql`. Debe aplicarse después de las migraciones actuales de cuentas, permisos, reloj de preparación y recuperación de incidencias. No es necesario volver a ejecutar todo `supabase/setup.sql`; este último incluye la migración para instalaciones nuevas.
+El enlace del prensista muestra los datos de la orden, materiales, herramentales, colores y tiempos de prensa. El metraje se divide automáticamente en bobinas de hasta 1,500 m, conservando el sobrante exacto: 3,000 m son dos bobinas; 3,200.123456 m son 1,500 + 1,500 + 200.123456 m. Si un registro histórico no tiene metraje disponible, se indica que no se estimaron bobinas.
 
-La migración crea una tabla privada por propietario y funciones para generar, listar y completar hojas. La generación al finalizar preparación se ejecuta en la misma transacción y no duplica hojas de una orden. El servidor local utiliza SQLite y crea su tabla automáticamente.
+El prensista pulsa **Finalizar bobina** para registrar su fecha y hora. Las bobinas de producción se terminan en secuencia. Las asignaciones manuales de bobinas que ya estuvieran capturadas en la versión anterior se conservan.
 
-Esta entrega prepara los archivos del borrador. No ejecuta SQL en el proyecto remoto ni publica el sitio.
+## Rebobinado
+
+En cuanto se termina la primera bobina, la orden aparece en el segundo bloque. Desde ahí se abre o copia su enlace independiente de rebobinado. La pantalla permite capturar etiquetas por rollo, centros, diámetros, vueltas, tiempos, etiquetas terminadas, empaque y resultados. Cada bobina debe haber terminado producción antes de finalizar su rebobinado. No hay que esperar a que se impriman las demás.
+
+Los enlaces permiten guardar únicamente campos de su etapa. Los datos de producción y rebobinado se guardan juntos en el perfil sin sobrescribirse entre sí. La pantalla receptora y los dos bloques revisan los avances cada 15 segundos mientras están visibles; también existe **Actualizar**. Los cambios manuales pendientes no se reemplazan con una actualización automática. Los conflictos de edición se detectan por versión.
+
+Cada etapa ofrece su propio PDF e impresión. El PDF de producción no incluye campos de rebobinado y el de rebobinado contiene el avance de sus bobinas. Los textos largos se conservan en anexos. Las horas respetan la configuración guardada.
+
+Guardar las hojas o terminar bobinas **no descuenta inventario ni confirma consumos**. Eso sigue realizándose en el flujo de consumos existente. Las órdenes canceladas quedan de solo consulta.
+
+Cada enlace contiene una clave exclusiva para esa hoja y etapa, sin abrir el inventario. Compártelo únicamente con las personas que trabajarán en ella.
+
+## Activación en Supabase
+
+- Si todavía no se activaron las hojas de prensista, ejecutar **`supabase/press-sheets.sql`** completo. Ya incluye el flujo de producción y rebobinado.
+- Si ya estaban activadas las hojas anteriores, basta con **`supabase/production-rewinding.sql`**.
+- No es necesario volver a ejecutar todo `supabase/setup.sql`; contiene ambas migraciones para instalaciones nuevas.
+
+Después, recargar el sitio y abrir **Órdenes para prensistas** con la cuenta administradora para recuperar las órdenes anteriores. Las migraciones se pueden repetir sin regenerar claves ni perder campos o avances.
+
+El servidor local crea las columnas automáticamente y recupera los registros al abrir el apartado. La validación local no ejecuta SQL en la cuenta remota: esa activación requiere acceso administrativo a Supabase.
