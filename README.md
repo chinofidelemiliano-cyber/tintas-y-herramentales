@@ -232,3 +232,9 @@ Planeación obligatoria desde captura (metros por bobina, tiempos esperados, sua
 ## Perfiles del personal
 
 Los enlaces de prensistas y rebobinado piden usuario y contraseña. Captura asigna a Julio Rocha o Manuel Carrillo y a Aurora Arroyo o Lorena Leticia; el servidor separa las órdenes por perfil y registra al responsable de cada bobina. El propietario conserva su vista completa. Activación: [perfiles del personal](docs/perfiles-personal.md), aplicando `supabase/operator-profiles.sql` después de producción interactiva.
+
+## Historial por responsable y rebobinado por rollos
+
+Historial privado de preparación, prensistas y rebobinado, con filtros por responsable y día/semana/mes, impresión conjunta, individual y PDF separados en ZIP. Logo en cada orden. Rebobinado registra tiempos por orden y rollo, cierre por millares reales con justificación de faltantes, espera de otra bobina separada del tiempo muerto e incidencias dictadas con PDF para muestras físicas. Producción agrega paros por falta de material/insumos.
+
+Activar una base existente con perfiles mediante `supabase/work-history-rewind.sql`. La migración acumulada `supabase/press-sheets.sql` también la incluye. Ver [activación y funcionamiento](docs/historial-y-rebobinado.md), incluidas las limitaciones del dictado y los registros históricos sin cronómetro.
