@@ -86,7 +86,7 @@ assert.equal(raw.ended_at.toISOString(),ended);
 await db.exec('set role anon');
 await assert.rejects(workflow('list'),/permission denied/);
 await db.exec('reset role');
-for(const file of ['production-types.sql','die-compatibility.sql','ink-reservations.sql','preparation-indicators.sql']){
+for(const file of ['production-types.sql','die-compatibility.sql','ink-reservations.sql','preparation-indicators.sql','closed-order-tooling.sql']){
  const sql=readFileSync(new URL('../supabase/'+file,import.meta.url),'utf8');
  await db.exec(sql);
  await db.exec(sql);
@@ -171,5 +171,21 @@ await workflow('edit_order',{id:print.id,revision:delegated.revision,reason:'Cam
 }});
 assert.deepEqual((await reserve('get')).reservations,[]);
 await assert.rejects(workflow('correct',{id:captured.id}),/permiso/);
+const correctTool=(operation,kind,extra={})=>rpc('closed_order_tooling',{operation,kind,id:captured.id,...extra});
+const correction=await correctTool('get','suaje');
+await assert.rejects(correctTool('save','suaje',{revision:correction.revision,product_id:inkLot.product_id,reason:'Error de captura'}),/herramental válido/);
+await correctTool('save','suaje',{revision:correction.revision,unidentified:true,reason:'Herramental pendiente de confirmar'});
+await assert.rejects(correctTool('save','suaje',{revision:correction.revision,product_id:cutDie,reason:'Error de captura'}),/cambió/);
+const unknown=await correctTool('get','suaje');
+assert.equal(unknown.label,null);
+assert.equal(Number(unknown.history[0].before.product_id),Number(cutDie));
+await correctTool('save','suaje',{revision:unknown.revision,product_id:cutDie,reason:'Confirmación del suaje'});
+const restored=(await correctTool('get','suaje')).history;
+assert.equal(restored.length,2);
+assert.equal(Number(restored[0].after.product_id),Number(cutDie));
+await db.exec('reset role');
+const closed=(await db.query('select status,specifications from public.prisma_orders where id=$1',[captured.id])).rows[0];
+assert.equal(closed.status,'confirmed');
+assert.equal(closed.specifications.actual_cut_meters,75);
 console.log('Validado: cronómetro, auditoría, clasificación, autorización de suaje, reservas, permisos delegados y cierre sin tinta.');
 await db.close();
