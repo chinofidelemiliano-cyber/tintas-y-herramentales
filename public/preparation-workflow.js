@@ -17,6 +17,7 @@ export function preparationTiming(order, clock, now = Date.now()) {
 
 export function preparationState(order,clock) {
  if (order.status === 'cancelled') return 'Cancelada';
+ if (clock?.handed_off_at) return 'Entregada a producción';
  if (order.ended_at || clock?.closed_at) return 'Preparada';
  if (!order.started_at) return 'Pendiente';
  if (clock?.paused_at) return 'En pausa';

@@ -6,3 +6,18 @@ const zone={timezoneMode:'custom',timeZone:'America/Mexico_City'};
 test('priority escalates by requested date in the configured time zone without lowering the initial priority',()=>{const plan={required_date:'2026-11-10',priority:'Normal'};for(const [date,expected]of [['2026-11-06T18:00:00Z','Normal'],['2026-11-07T18:00:00Z','Alta'],['2026-11-09T18:00:00Z','Urgente'],['2026-11-11T18:00:00Z','Vencida']])assert.equal(effectivePriority(plan,zone,new Date(date)),expected);assert.equal(effectivePriority({...plan,priority:'Urgente'},zone,new Date('2026-11-01T12:00:00Z')),'Urgente');assert.equal(effectivePriority(plan,zone,new Date('2026-11-11T02:00:00Z')),'Urgente');});
 test('complete capture validates packaging, dimensions and every assigned reel and survives repeated normalization',()=>{const input={...captureData(3000,1500),folio:'OP-FULL',np:'NP1',product:'P',pressman:'Julio Rocha',rewind_operator:'AA',machine:'Comco 1',scheduled_date:'2026-11-06',scheduled_start:'08:00',requested_thousands:10.125,expected_bobina_minutes:10,expected_production_minutes:20,finish:'Barniz',has_crease:'no',die_id:1,colors:'Azul'};const out=normalizePortalOrder(input);assert.deepEqual(normalizePortalOrder(out),out);assert.equal(out.production_plan.labels_per_roll,1000);assert.equal(out.production_plan.assigned_reels.length,2);for(const patch of [{width_mm:0},{labels_per_roll:1.1},{required_date:'2026-02-30'},{priority:'x'},{assigned_reels:[]},{assigned_reels:[{identifier:'B',lot:'L',width_mm:200,meters:1499},{identifier:'C',lot:'L',width_mm:200,meters:1500}]}])assert.throws(()=>normalizeCapturePlanning({...input,...patch}));});
 test('captured planning appears read-only in operator sheets including material and assigned reels',()=>{const plan={...normalizeCapturePlanning(captureData()),reel_meters:1500,finish:'Barniz'},source={folio:'OP-FULL',pieces:10000,production_plan:plan,time_settings:zone};const production=pressSheetLayout({stage:'production',source,fields:{material_code:'Wrong'},bobinas:[]});assert.ok(production.some(s=>s.heading.includes('BOBINAS ASIGNADAS')));assert.equal(production.flatMap(s=>s.rows.flat()).find(c=>c.label==='Clave / ID material').value,'MAT-1');const rewind=pressSheetLayout({stage:'rewind',finishing_version:1,source,fields:{},rolls:[]});const labels=rewind.flatMap(s=>s.rows.flat()).find(c=>c.label==='Etiquetas por rollo');assert.equal(labels.value,'1000');assert.equal(labels.key,undefined);});
+
+test('classified captures enforce process-specific tool and ink fields',()=>{
+ const base={...captureData(),folio:'OP-TIPO',np:'NP',product:'P',pressman:'Julio Rocha',rewind_operator:'AA',
+  machine:'Comco 1',scheduled_date:'2026-11-24',scheduled_start:'08:00',requested_thousands:10,
+  expected_bobina_minutes:10,expected_production_minutes:20,finish:'Sin acabado',colors:'',ink_selections:[]};
+ const cut=normalizePortalOrder({...base,production_type:'cut',die_id:2,has_crease:'no'});
+ assert.deepEqual(normalizePortalOrder(cut),cut);
+ assert.deepEqual(cut.ink_selections,[]);
+ const print=normalizePortalOrder({...base,production_type:'print',plates:'PLC-1',ink_selections:[{slot:1,pantone:'123',ink_family:'UV'}]});
+ assert.equal(print.production_plan.has_crease,'no');
+ assert.equal(print.production_plan.plates,'PLC-1');
+ assert.throws(()=>normalizePortalOrder({...base,production_type:'cut'}),/suaje/);
+ assert.throws(()=>normalizePortalOrder({...base,production_type:'white'}),/blanca/);
+ assert.throws(()=>normalizePortalOrder({...base,production_type:'print',die_id:2,plates:'PLC-1',ink_selections:[{slot:1,pantone:'123'}]}),/herramentales/);
+});

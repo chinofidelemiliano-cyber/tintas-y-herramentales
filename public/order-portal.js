@@ -1,3 +1,4 @@
+import {productionRequirements,productionTypes} from './production-type.js';
 import {effectivePriority} from './capture-planning.js';
 import {decimalCeilRatio,decimalDifference,decimalMultiply} from './quantity.js';
 import {setTimeSettings,todayInZone,formatTimestamp,formatWallTime} from './time.js';
@@ -15,7 +16,7 @@ async function api(payload){
 }
 const number=n=>formatQuantity(n);
 function renderQueue(){
- $('#order-list').innerHTML=rows.length?rows.map(o=>`<article class="order-card"><div class="sequence"><small>SECUENCIA</small>#${String(o.queue_number).padStart(3,'0')}</div><div><h3>${esc(o.folio)} · ${esc(o.np)}</h3><p><strong>${esc(o.product)}</strong>${o.client?' · '+esc(o.client):''}</p><p>${esc(o.scheduled_date)} · ${esc(formatWallTime(o.scheduled_start))}${o.scheduled_end?' → '+esc(formatWallTime(o.scheduled_end))+(o.scheduled_end<o.scheduled_start?' (día siguiente)':''):''}<br>${esc(o.pressman)} · ${esc(o.machine)}<br>Entrega solicitada: ${esc(o.capture_plan?.required_date||'Pendiente')} · Prioridad: <strong>${esc(effectivePriority(o.capture_plan||{}))}</strong></p><p class="colors">${o.ink_family?esc(o.ink_family)+' · ':''}Colores: ${esc(o.colors)}</p>${o.die||o.crease?`<p>${o.die?'Suaje: '+esc(o.die):''}${o.die&&o.crease?' · ':''}${o.crease?'Pleca: '+esc(o.crease):''}</p>`:''}${o.pieces!=null||o.planned_meters!=null?`<p>${o.pieces!=null?number(o.pieces)+' piezas':''}${o.pieces!=null&&o.planned_meters!=null?' · ':''}${o.planned_meters!=null?number(o.planned_meters)+' m':''}</p>`:''}${o.notes?`<p>${esc(o.notes)}</p>`:''}</div><span class="order-status ${o.started_at&&!o.ended_at?'running':''}">${o.status==='cancelled'?'Cancelada':o.ended_at?'Preparada':o.started_at?'En curso':'En espera'}</span></article>`).join(''):'<p class="empty">No hay órdenes en esta lista. La siguiente captura ocupará su lugar al guardarse.</p>';
+ $('#order-list').innerHTML=rows.length?rows.map(o=>`<article class="order-card"><div class="sequence"><small>SECUENCIA</small>#${String(o.queue_number).padStart(3,'0')}</div><div><h3>${esc(o.folio)} · ${esc(o.np)}</h3><p><strong>${esc(o.product)}</strong>${o.client?' · '+esc(o.client):''}</p><p>${esc(o.scheduled_date)} · ${esc(formatWallTime(o.scheduled_start))}${o.scheduled_end?' → '+esc(formatWallTime(o.scheduled_end))+(o.scheduled_end<o.scheduled_start?' (día siguiente)':''):''}<br>${esc(o.pressman)} · ${esc(o.machine)}<br>Entrega solicitada: ${esc(o.capture_plan?.required_date||'Pendiente')} · Prioridad: <strong>${esc(effectivePriority(o.capture_plan||{}))}</strong></p> ${o.capture_plan?.production_type?`<p>${esc(productionTypes[o.capture_plan.production_type])}</p>`:''}${o.colors?`<p class="colors">${o.ink_family?esc(o.ink_family)+' · ':''}Colores: ${esc(o.colors)}</p>`: ''}${o.die||o.crease?`<p>${o.die?'Suaje: '+esc(o.die):''}${o.die&&o.crease?' · ':''}${o.crease?'Pleca: '+esc(o.crease):''}</p>`:''}${o.pieces!=null||o.planned_meters!=null?`<p>${o.pieces!=null?number(o.pieces)+' piezas':''}${o.pieces!=null&&o.planned_meters!=null?' · ':''}${o.planned_meters!=null?number(o.planned_meters)+' m':''}</p>`:''}${o.notes?`<p>${esc(o.notes)}</p>`:''}</div><span class="order-status ${o.started_at&&!o.ended_at?'running':''}">${o.status==='cancelled'?'Cancelada':o.ended_at?'Preparada':o.started_at?'En curso':'En espera'}</span></article>`).join(''):'<p class="empty">No hay órdenes en esta lista. La siguiente captura ocupará su lugar al guardarse.</p>';
  $('#load-more').hidden=!hasMore;$('#updated').textContent='Actualizado '+formatTimestamp(new Date(),undefined,{hour:'2-digit',minute:'2-digit'});
  $('#pressmen').innerHTML=[...new Set(rows.map(o=>o.pressman))].map(name=>`<option value="${esc(name)}"></option>`).join('');
 }
@@ -39,16 +40,45 @@ function saveDraft(){try{sessionStorage.setItem(storageKey,JSON.stringify({field
 async function initialize(){
  if(!/^op_[a-f0-9]{64}$/.test(accessKey))throw Error('Abre el enlace completo de captura que te compartió el administrador.');
  await refresh();const catalog=await api({operation:'catalog'});if(catalog.capture_version!==2)throw Error('Falta activar la captura completa. Ejecuta el archivo activar-produccion.sql completo desde la ayuda de configuración.');if(catalog.production_workflow_version!==4)throw Error('Falta activar los perfiles del personal: el administrador debe ejecutar supabase/operator-profiles.sql en Supabase y recargar esta página.');picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products,catalog.ink_options||[]);renderToolCatalog(catalog);$('#workspace').hidden=false;
- const form=$('#order-form');form.elements.scheduled_date.value=todayInZone();
+ const form=$('#order-form');
+ const classified=catalog.production_types_version===1;
+ const type=form.elements.production_type,white=form.elements.white_process,plates=form.elements.plates;
+ $('#production-type-fields').hidden=!classified;
+ type.disabled=!classified;
+ type.required=classified;
+ const updateType=()=>{
+  const whiteVisible=classified&&type.value==='white';
+  $('#white-process').hidden=!whiteVisible;
+  white.disabled=!whiteVisible;
+  white.required=whiteVisible;
+  let process={printing:true,cutting:true};
+  if(classified){try{process=productionRequirements(type.value,white.value);}catch{process={printing:false,cutting:false};}}
+  $('#print-fields').hidden=!process.printing;
+  $('#plate-field').hidden=!classified;
+  plates.disabled=!classified||!process.printing;
+  plates.required=classified&&process.printing;
+  const cutFields=[form.elements.die_id,form.elements.has_crease,form.elements.crease_id];
+  for(const control of cutFields)control.closest('label').hidden=!process.cutting;
+  form.elements.die_id.disabled=!process.cutting;
+  form.elements.die_id.required=process.cutting;
+  form.elements.has_crease.disabled=!process.cutting;
+  updateCrease();
+  return process;
+ };
+ form.elements.scheduled_date.value=todayInZone();
  try{const saved=JSON.parse(sessionStorage.getItem(storageKey)||'null');if(saved){for(const [key,value]of Object.entries(saved.fields||{}))if(form.elements.namedItem(key))form.elements.namedItem(key).value=value;picker.restore((saved.ink_selections||[]).map(i=>({...i,ink_family:i.ink_family||saved.fields?.ink_family}))); pending=saved.pending;reelDraft=saved.assigned_reels||[];}}catch{}
  renderAssigned(reelDraft);for(const name of ['meters','reel_meters'])form.elements[name].addEventListener('change',()=>renderAssigned());for(const name of ['required_date','priority'])form.elements[name].addEventListener('change',showPriority);showPriority();
- const updateCrease=()=>{form.elements.crease_id.required=form.elements.has_crease.value==='yes';form.elements.crease_id.disabled=form.elements.has_crease.value!=='yes';if(form.elements.has_crease.value==='no')form.elements.crease_id.value='';};form.elements.has_crease.onchange=updateCrease;updateCrease();form.addEventListener('input',saveDraft);form.addEventListener('change',saveDraft);
+ const updateCrease=()=>{form.elements.crease_id.required=!form.elements.has_crease.disabled&&form.elements.has_crease.value==='yes';form.elements.crease_id.disabled=form.elements.has_crease.disabled||form.elements.has_crease.value!=='yes';if(form.elements.has_crease.value==='no')form.elements.crease_id.value='';};form.elements.has_crease.onchange=updateCrease;type.onchange=updateType;white.onchange=updateType;updateType();form.addEventListener('input',saveDraft);form.addEventListener('change',saveDraft);
  form.onsubmit=async event=>{
   event.preventDefault();$('#form-error').hidden=true;$('#form-success').hidden=true;let order;
-  try{order=normalizePortalOrder({...Object.fromEntries(new FormData(form)),ink_selections:picker.value(),assigned_reels:assignedReels()});}catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;return;}
+  try{
+   const printing=updateType().printing,fields=Object.fromEntries(new FormData(form));
+   if(!printing)fields.colors='';
+   order=normalizePortalOrder({...fields,ink_selections:printing?picker.value():[],assigned_reels:assignedReels()});
+  }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;return;}
   if(!pending||JSON.stringify(pending.order)!==JSON.stringify(order))pending={request_key:crypto.randomUUID(),order};saveDraft();$('#order-fields').disabled=true;
-  try{const result=await api({operation:'submit',...pending});pending=null;const keep={pressman:order.pressman,machine:order.machine,scheduled_date:order.scheduled_date};form.reset();for(const [key,value]of Object.entries(keep))form.elements.namedItem(key).value=value;picker.reset();renderAssigned([]);showPriority();updateCrease();try{sessionStorage.removeItem(storageKey);}catch{}
-   $('#form-success').textContent=`Orden ${order.folio} registrada en la secuencia #${String(result.queue_number).padStart(3,'0')}. Ya está disponible en planta.`;$('#form-success').hidden=false;
+  try{const result=await api({operation:'submit',...pending});pending=null;const keep={pressman:order.pressman,machine:order.machine,scheduled_date:order.scheduled_date};form.reset();for(const [key,value]of Object.entries(keep))form.elements.namedItem(key).value=value;picker.reset();renderAssigned([]);showPriority();updateType();try{sessionStorage.removeItem(storageKey);}catch{}
+   $('#form-success').textContent=`Orden ${order.folio} registrada en la secuencia #${String(result.queue_number).padStart(3,'0')}. Ya está disponible en planta.`+(result.die_compatibility==='incompatible'?' ADVERTENCIA: SUAJE NO COMPATIBLE CON EL MATERIAL. La preparación requiere autorización técnica.':result.die_compatibility==='unverified'?' Compatibilidad no verificada.':'');$('#form-success').hidden=false;
    await refresh().catch(()=>{});
   }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;}finally{$('#order-fields').disabled=false;}
  };

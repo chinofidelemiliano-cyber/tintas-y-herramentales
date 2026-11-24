@@ -7,7 +7,8 @@ function toolUsage(orders,products,label,idKey,prefix){
  for(const order of orders){
   if(order.status!=='confirmed')continue;
   const specs=order.specifications||{},product=products.find(p=>p.id===Number(specs[idKey])&&p.category==='herramental'&&new RegExp('^'+prefix,'i').test(p.code)),code=product?.code||String(specs[label]||'').match(new RegExp('\\b'+prefix+'[\\w-]+','i'))?.[0]?.toUpperCase();
-  const values=(order.lines||[]).map(l=>l.meters).filter(v=>v!==null&&v!==undefined&&v!==''),unique=[...new Set(values.map(Number))];
+  if(specs.production_plan?.production_type==='print')continue;
+  const values=[...(order.lines||[]).map(l=>l.meters),specs.actual_cut_meters].filter(v=>v!==null&&v!==undefined&&v!==''),unique=[...new Set(values.map(Number))];
   const meters=unique.length===1&&Number.isFinite(unique[0])&&unique[0]>=0?unique[0]:null;
   if(!code||meters===null){pending.push({order,reason:!code?'Sin '+label+' '+prefix+' relacionado':unique.length>1?'Metros distintos entre renglones; requiere revisión':'Sin metros reales registrados'});continue;}
   if(!groups.has(code))groups.set(code,{code,name:product?.name||'',meters:0,runs:[]});

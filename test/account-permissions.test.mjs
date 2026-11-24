@@ -4,7 +4,7 @@ import {allowedView,permissionLabels} from '../public/account-permissions.js';
 import {rememberLoginAppearance,readLoginPreferences,initialProfilePreferences,savePreferences,cacheProfilePreferences} from '../public/preferences.js';
 test('pending accounts have no views and only administrators see account management',()=>{
  const pending={is_admin:false,permissions:[]};for(const view of ['inventario','ordenes','administracion','configuracion'])assert.ok(!allowedView(view,pending));
- assert.ok(allowedView('preparacion',{permissions:['preparation']}));assert.ok(!allowedView('ordenes',{permissions:['preparation']}));assert.ok(allowedView('administracion',{is_admin:true,permissions:[]}));assert.ok(!allowedView('administracion',null));assert.equal(Object.keys(permissionLabels).length,10);
+ assert.ok(allowedView('preparacion',{permissions:['preparation']}));assert.ok(!allowedView('ordenes',{permissions:['preparation']}));assert.ok(allowedView('administracion',{is_admin:true,permissions:[]}));assert.ok(!allowedView('administracion',null));assert.equal(Object.keys(permissionLabels).length,15);
 });
 test('login appearance survives logout without sharing profile names or report settings',t=>{
  const old=globalThis.localStorage,values=new Map();globalThis.localStorage={getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v)};t.after(()=>globalThis.localStorage=old);

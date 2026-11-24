@@ -18,8 +18,25 @@ El SQL añade registros de cronómetro por orden, preferencias de recordatorios 
 
 - **Preparación de órdenes → Recordatorios** configura los avisos personales. La jornada usa la zona horaria activa del perfil. Los avisos aparecen en el indicador con el sitio abierto.
 - **Ver orden** muestra la lista generada a partir de los datos existentes. La preparación en curso conserva el estado de sus elementos al recargar.
-- **Editar planeación** permite al administrador ajustar máquina, fecha de entrega, prioridad, minutos estimados y observaciones mientras la orden esté pendiente o en preparación. El motivo y los valores anteriores quedan registrados. El responsable recibe un aviso en el cronómetro.
-- **Corregir tiempos** permite al administrador ajustar una preparación finalizada. Los tiempos de la última corrección alimentan los indicadores detallados y el historial por responsable.
-- **Indicadores** consulta las preparaciones con tiempos detallados del mes seleccionado y admite filtros de máquina y responsable. El preparador consulta sus propios relojes y el administrador puede consultar todos.
+- **Editar planeación** permite a las cuentas con permiso de edición ajustar máquina, fecha de entrega, prioridad, minutos estimados y observaciones mientras la orden esté pendiente o en preparación. El motivo y los valores anteriores quedan registrados. El responsable recibe un aviso en el cronómetro.
+- **Corregir tiempos** permite a las cuentas con permiso de corrección ajustar una preparación finalizada. Los tiempos de la última corrección alimentan los indicadores detallados y el historial por responsable.
+- **Indicadores** consulta las preparaciones con tiempos detallados del mes seleccionado y admite filtros de máquina y responsable. El preparador consulta sus propios relojes y las cuentas con permiso de indicadores pueden consultar todos.
 
 El piloto SQLite conserva su comportamiento anterior. La migración de Supabase se valida en PostgreSQL temporal con `scripts/validate-preparation-workflow.mjs`. Este script acepta la ruta a `@electric-sql/pglite/dist/index.js` en `PRISMA_PGLITE_MODULE`. La prueba sustituye el servicio de cron de Supabase y deja fuera la extensión que envía solicitudes de red.
+
+## Órdenes, suajes y reservas
+
+En el entorno de prueba, aplica los archivos SQL en este orden:
+
+1. `supabase/preparation-workflow.sql`
+2. `supabase/production-types.sql`
+3. `supabase/die-compatibility.sql`
+4. `supabase/ink-reservations.sql`
+5. `supabase/preparation-indicators.sql`
+
+Publica primero la interfaz actualizada para que la captura reconozca el tipo obligatorio cuando se active su migración. Coordina la activación con quienes usan el enlace compartido y pídeles recargar antes de enviar nuevas órdenes.
+
+- La captura compartida valida tintas, placas, suaje y pleca según el proceso. Las órdenes previas siguen visibles y se muestran como sin clasificar. Para puro corte o material blanco sin impresión, registra los metros reales desde el detalle de la orden en Supabase.
+- Registra dictámenes de suaje desde el detalle de una orden con código de material y suaje de catálogo. En el fundamento técnico, documenta las medidas y especificaciones revisadas. Una incompatibilidad requiere una autorización de una cuenta con el permiso correspondiente. Sin un dictamen registrado para el par suaje y material, el resultado es «Compatibilidad no verificada».
+- Se reservan gramos por lote de una tinta de catálogo que figure en la orden. El saldo físico se modifica al registrar los movimientos o confirmar el consumo. Las reservas relacionadas se liberan al quitar la tinta o confirmar o cancelar la orden.
+- En **Cuentas y seguridad**, aplica una plantilla y ajusta permisos individuales antes de guardar. Los administradores existentes mantienen sus permisos. Para delegar una acción de preparación, concede también el permiso general de preparación.

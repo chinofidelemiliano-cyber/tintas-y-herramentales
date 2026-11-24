@@ -1,6 +1,19 @@
 -- Aplicar después de las migraciones de órdenes, previa copia de seguridad de Supabase.
 begin;
 
+-- Preserve the existing account screen and grant only the added operations explicitly.
+do $$
+declare original text; changed text;
+begin
+ original:=pg_get_functiondef('public.prisma_admin_accounts(jsonb)'::regprocedure);
+ if position('preparation_edit' in original)=0 then
+  changed:=replace(original,$old$'production_audit']$old$,
+   $new$'production_audit','preparation_edit','preparation_correct','die_authorize','preparation_kpi','preparation_handoff']$new$);
+  if changed=original then raise exception 'La lista de permisos instalada no coincide con la versión requerida.'; end if;
+  execute changed;
+ end if;
+end $$;
+
 create table if not exists public.prisma_preparation_clocks (
  order_id bigint primary key references public.prisma_orders(id),
  responsible uuid references auth.users(id),
@@ -9,9 +22,13 @@ create table if not exists public.prisma_preparation_clocks (
  closed_at timestamptz,
  correction jsonb,
  checklist jsonb not null default '{}',
+ handed_off_at timestamptz,
+ handed_off_by uuid references auth.users(id),
  version integer not null default 0
 );
 alter table public.prisma_preparation_clocks add column if not exists checklist jsonb not null default '{}';
+alter table public.prisma_preparation_clocks add column if not exists handed_off_at timestamptz;
+alter table public.prisma_preparation_clocks add column if not exists handed_off_by uuid references auth.users(id);
 create unique index if not exists prisma_one_open_preparation
  on public.prisma_preparation_clocks(responsible) where closed_at is null;
 
@@ -77,6 +94,11 @@ revoke all on function public.prisma_preparation_items(bigint,jsonb) from public
 create or replace function public.prisma_preparation_order_fields(o public.prisma_orders) returns jsonb
 language sql immutable set search_path=public,pg_temp as $$
  select jsonb_build_object('notes',o.notes,'machine',o.machine,
+  'ink_selections',o.ink_selections,'colors',o.specifications->>'colores',
+  'die_id',o.specifications->>'die_id','crease_id',o.specifications->>'crease_id',
+  'material_code',o.specifications->'production_plan'->>'material_code',
+  'plates',o.specifications->>'placas',
+  'requested_thousands',o.pieces/1000,
   'required_date',o.specifications->'production_plan'->>'required_date',
   'priority',o.specifications->'production_plan'->>'priority',
   'estimated_minutes',o.specifications->'production_plan'->>'estimated_preparation_minutes');
@@ -196,6 +218,18 @@ declare
  second_limit integer;
  shift_limit time;
  reminder_settings jsonb;
+ updated_specs jsonb;
+ tool public.prisma_products%rowtype;
+ tool_key text;
+ label_key text;
+ tool_value text;
+ quantity numeric;
+ inks jsonb;
+ ink jsonb;
+ ink_slot integer;
+ ink_labels text[];
+ next_slots integer[];
+ pantone text;
 begin
  perform public.prisma_require_permission('preparation');
  if op='reminders' then
@@ -225,7 +259,7 @@ begin
    from public.prisma_preparation_clocks cw join public.prisma_orders ord on ord.id=cw.order_id
    left join public.prisma_user_preferences prefs on prefs.user_id=cw.responsible
    left join auth.users person on person.id=cw.responsible
-   where cw.responsible=auth.uid() or exists(select 1 from public.prisma_admins where user_id=auth.uid())
+   where cw.responsible=auth.uid() or public.prisma_has_permission(auth.uid(),'preparation_kpi') or public.prisma_has_permission(auth.uid(),'preparation_correct') or public.prisma_has_permission(auth.uid(),'preparation_handoff')
   ),'[]'::jsonb));
  end if;
  if op='check_item' then
@@ -248,14 +282,32 @@ begin
    values(o.id,auth.uid(),op,previous,c.checklist);
   return jsonb_build_object('version',c.version,'items',public.prisma_preparation_items(o.id,c.checklist));
  end if;
- perform public.prisma_require_admin();
+ if op='handoff' then
+  perform public.prisma_require_permission('preparation_handoff');
+  perform pg_advisory_xact_lock(104202611);
+  select * into o from public.prisma_orders where id=(payload->>'id')::bigint for update;
+  if not found or o.status='cancelled' or o.ended_at is null then raise exception 'La preparación debe estar finalizada.'; end if;
+  insert into public.prisma_preparation_clocks(order_id,closed_at) values(o.id,o.ended_at) on conflict(order_id) do nothing;
+  update public.prisma_preparation_clocks set handed_off_at=clock_timestamp(),handed_off_by=auth.uid(),version=version+1
+   where order_id=o.id and handed_off_at is null returning * into c;
+  if found then insert into public.prisma_preparation_audit(order_id,actor,operation,before_value,after_value)
+    values(o.id,auth.uid(),op,'{}',jsonb_build_object('handed_off_at',c.handed_off_at)); end if;
+  return jsonb_build_object('id',o.id);
+ end if;
  if op='history' then
+  if not (public.prisma_has_permission(auth.uid(),'preparation_edit') or public.prisma_has_permission(auth.uid(),'preparation_correct')) then
+   perform public.prisma_require_admin();
+  end if;
   return jsonb_build_object('history',coalesce((
    select jsonb_agg(to_jsonb(a) order by a.id desc)
    from public.prisma_preparation_audit a where a.order_id=(payload->>'id')::bigint
+    and (exists(select 1 from public.prisma_admins where user_id=auth.uid())
+     or (a.operation='edit_order' and public.prisma_has_permission(auth.uid(),'preparation_edit'))
+     or (a.operation='correct' and public.prisma_has_permission(auth.uid(),'preparation_correct')))
   ),'[]'::jsonb));
  end if;
  if op in ('edit_fields','edit_order') then
+  perform public.prisma_require_permission('preparation_edit');
   if op='edit_order' then perform pg_advisory_xact_lock(104202611); end if;
   select * into o from public.prisma_orders where id=(payload->>'id')::bigint for update;
   if not found or o.status<>'draft' or o.ended_at is not null then
@@ -275,7 +327,7 @@ begin
    raise exception 'Revisa la máquina, la fecha, la prioridad, las observaciones y el motivo.';
   end if;
   if left(edit->>'machine',5)='Comco' and exists(
-   select 1 from jsonb_array_elements(o.ink_selections) slot where (slot->>'slot')::integer>6) then
+   select 1 from jsonb_array_elements(coalesce(edit->'ink_selections',o.ink_selections)) slot where (slot->>'slot')::integer>6) then
    raise exception 'La orden usa más posiciones de tinta de las que admite la máquina.';
   end if;
   delivery:=(edit->>'required_date')::date;
@@ -283,8 +335,102 @@ begin
   if estimate is not null and estimate not between 1 and 1440 then raise exception 'Estimación fuera de rango.'; end if;
   plan:=coalesce(o.specifications->'production_plan','{}'::jsonb)||jsonb_build_object(
    'required_date',delivery,'priority',edit->>'priority','estimated_preparation_minutes',estimate);
-  update public.prisma_orders set notes=edit->>'notes',machine=edit->>'machine',
-   specifications=jsonb_set(specifications,'{production_plan}',plan) where id=o.id returning * into o;
+  updated_specs:=o.specifications;
+  if edit ? 'material_code' then
+   if length(trim(coalesce(edit->>'material_code','')))>200 then raise exception 'Código de material demasiado largo.'; end if;
+   plan:=plan||jsonb_build_object('material_code',trim(coalesce(edit->>'material_code','')));
+  end if;
+  if edit ? 'plates' then
+   if length(trim(coalesce(edit->>'plates','')))>200 then raise exception 'Dato de placas demasiado largo.'; end if;
+   updated_specs:=updated_specs||jsonb_build_object('placas',trim(coalesce(edit->>'plates','')));
+  end if;
+  for tool_key,label_key in select * from (values ('die_id','suaje'),('crease_id','pleca')) names loop
+   if edit ? tool_key then
+    tool_value:=nullif(edit->>tool_key,'');
+    if tool_value is not null then
+     select * into tool from public.prisma_products where id=tool_value::bigint and category='herramental'
+      and code like case when tool_key='die_id' then 'SJ%' else 'PD%' end;
+     if not found then raise exception 'Selecciona un herramental válido.'; end if;
+     updated_specs:=updated_specs||jsonb_build_object(tool_key,tool.id,label_key,tool.code||' · '||tool.name);
+    elsif updated_specs ? tool_key then
+     updated_specs:=updated_specs-array[tool_key,label_key];
+    end if;
+    if tool_key='crease_id' then
+     plan:=plan||jsonb_build_object('has_crease',case when updated_specs ? tool_key then 'yes' else 'no' end);
+    end if;
+   end if;
+  end loop;
+  if plan->>'production_type' in ('cut','print_cut','white') and not (updated_specs ? 'die_id') then
+   raise exception 'El proceso requiere un suaje.';
+  end if;
+  if plan->>'production_type'='print' and (updated_specs ? 'die_id' or updated_specs ? 'crease_id') then
+   raise exception 'Solo impresión no admite herramentales de corte.';
+  end if;
+  if (plan->>'production_type' in ('print','print_cut') or plan->>'white_process'='ink')
+   and coalesce(updated_specs->>'placas','')='' then raise exception 'Captura placas o clichés.'; end if;
+  if plan->>'production_type'='cut' or plan->>'white_process'='material' then
+   if coalesce(updated_specs->>'placas','')<>'' then raise exception 'Este proceso no admite placas.'; end if;
+  end if;
+  inks:=o.ink_selections;
+  if edit ? 'ink_selections' then
+   inks:=edit->'ink_selections';
+   if jsonb_typeof(inks) is distinct from 'array' or jsonb_array_length(inks)>12 then
+    raise exception 'Revisa las posiciones de tinta.';
+   end if;
+   if plan->>'production_type'='cut' or plan->>'white_process'='material' then
+    if jsonb_array_length(inks)>0 then raise exception 'Este proceso no admite tintas.'; end if;
+   elsif (plan->>'production_type' in ('print','print_cut') or plan->>'white_process'='ink') and jsonb_array_length(inks)=0 then
+    raise exception 'Selecciona las tintas requeridas por la orden.';
+   end if;
+   if inks is distinct from o.ink_selections then
+    if exists(select 1 from public.prisma_items where order_id=o.id) then
+     raise exception 'La orden ya tiene pesajes. Revisa la bitácora antes de cambiar sus tintas.';
+    end if;
+    ink_labels:=array[]::text[];
+    next_slots:=array[]::integer[];
+    for ink in select value from jsonb_array_elements(inks) loop
+     ink_slot:=(ink->>'slot')::integer;
+     pantone:=trim(coalesce(ink->>'pantone',''));
+     if ink_slot is null or ink_slot not between 1 and (case when left(edit->>'machine',5)='Comco' then 6 else 12 end)
+      or ink_slot=any(next_slots) or ((pantone='')=(nullif(ink->>'product_id','') is null))
+      or length(pantone)>100
+      or coalesce(ink->>'ink_family','') not in ('','Base Agua','UV','Film') then
+      raise exception 'Revisa las posiciones de tinta o Pantone.';
+     end if;
+     next_slots:=array_append(next_slots,ink_slot);
+     if pantone<>'' then
+      ink_labels:=array_append(ink_labels,'Pantone '||pantone);
+     else
+      select * into tool from public.prisma_products where id=(ink->>'product_id')::bigint and category='tinta';
+      if not found or (ink->>'ink_family'='UV' and lower(trim(tool.kind))<>'uv')
+       or (ink->>'ink_family'='Film' and lower(trim(tool.kind))<>'film')
+       or (ink->>'ink_family'='Base Agua' and lower(trim(tool.kind)) not in ('base agua','base de agua','agua')) then
+        raise exception 'Selecciona una tinta del catálogo y tipo correspondiente.';
+      end if;
+      ink_labels:=array_append(ink_labels,tool.name||' ['||tool.code||']');
+     end if;
+    end loop;
+    if exists(select 1 from public.prisma_pantone_requests p where p.order_id=o.id and p.status<>'pending'
+      and not exists(select 1 from jsonb_array_elements(inks) j where (j->>'slot')::integer=p.slot and j->>'pantone'=p.pantone)) then
+     raise exception 'Conserva los Pantones ya preparados y sus movimientos.';
+    end if;
+    delete from public.prisma_pantone_requests p where p.order_id=o.id and p.status='pending'
+     and not exists(select 1 from jsonb_array_elements(inks) j where (j->>'slot')::integer=p.slot and j->>'pantone'=p.pantone);
+    insert into public.prisma_pantone_requests(order_id,slot,pantone)
+     select o.id,(j->>'slot')::integer,trim(j->>'pantone') from jsonb_array_elements(inks) j
+     where nullif(trim(j->>'pantone'),'') is not null on conflict(order_id,slot) do nothing;
+    updated_specs:=(updated_specs-'tipo_tinta')||jsonb_build_object('colores',array_to_string(ink_labels,' · '));
+   end if;
+  end if;
+  quantity:=o.pieces;
+  if nullif(edit->>'requested_thousands','') is not null then
+   if edit->>'requested_thousands' !~ '^[0-9]+([.][0-9]+)?$' then raise exception 'Cantidad no válida.'; end if;
+   quantity:=(edit->>'requested_thousands')::numeric*1000;
+   if quantity<=0 or quantity>1e12 then raise exception 'Cantidad no válida.'; end if;
+   plan:=plan||jsonb_build_object('requested_thousands',quantity/1000);
+  end if;
+  update public.prisma_orders set notes=edit->>'notes',machine=edit->>'machine',pieces=quantity,ink_selections=inks,
+   specifications=jsonb_set(updated_specs,'{production_plan}',plan) where id=o.id returning * into o;
   corrected:=public.prisma_preparation_order_fields(o);
   if previous is distinct from corrected then
    insert into public.prisma_preparation_audit(order_id,actor,operation,reason,before_value,after_value)
@@ -293,6 +439,7 @@ begin
   return jsonb_build_object('id',o.id);
  end if;
  if op is distinct from 'correct' then raise exception 'Acción no permitida.'; end if;
+ perform public.prisma_require_permission('preparation_correct');
  perform pg_advisory_xact_lock(104202611);
  select * into o from public.prisma_orders where id=(payload->>'id')::bigint for update;
  if not found or o.status='cancelled' or o.started_at is null or o.ended_at is null then

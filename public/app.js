@@ -1,3 +1,5 @@
+import {mountInkPicker} from './ink-picker.js';
+import {productionTypes} from './production-type.js';
 import {createPreparationIndicator, preparationTiming, preparationState} from './preparation-workflow.js';
 import {effectivePriority,priorities} from './capture-planning.js';
 import {workHistoryView,bindWorkHistory} from './work-history.js';
@@ -45,6 +47,7 @@ let toastTimer,activeIncidentEditor=null;const incidentReminder=createIncidentRe
 modal.addEventListener('close',()=>{const editor=activeIncidentEditor;activeIncidentEditor=null;editor?.leave();});document.addEventListener('visibilitychange',()=>{if(document.hidden)activeIncidentEditor?.flush();});window.addEventListener('pagehide',()=>activeIncidentEditor?.stage());window.addEventListener('beforeunload',event=>{if(activeIncidentEditor?.isUnsafe()){activeIncidentEditor.stage();event.preventDefault();event.returnValue='';}});
 let preparationClocks=[];
 let hasPreparationWorkflow=false;
+const can=permission=>accountAccess?.is_admin||accountAccess?.permissions.includes(permission);
 let preparationReminders={};
 let preparationLoadSequence=0;
 const preparationIndicator=createPreparationIndicator({
@@ -65,6 +68,7 @@ async function loadPreparationClocks(){
    preparationClocks=result.clocks;
    preparationReminders=result.reminders;
    hasPreparationWorkflow=true;
+   preparationEvents=null;
    preparationIndicator.update(preparationClocks,cloud.userId(),preparationReminders);
    return;
   }catch(error){if(error.code!=='PREPARATION_WORKFLOW_REQUIRED')toast(error.message);}
@@ -119,12 +123,12 @@ function installLogout(){
  button.onclick=async()=>{try{await stopDeviceOnLogout(cloud);}catch{toast('No se pudo confirmar la desactivación local de los avisos. Revisa los permisos del navegador.');}await cloud.signOut();data=null;profileLoaded=false;profileError='';notificationUser='';settings=readLoginPreferences();button.remove();renderLogin();};translateDOM(button,settings.language);
 }
 function setAuthAppearance(change){settings={...settings,...change};rememberLoginAppearance(settings);applyPreferences();}
-function renderLogin(message=''){preparationIndicator.clear();preparationClocks=[];hasPreparationWorkflow=false;incidentReminder.update([],settings.siteName);
+function renderLogin(message=''){preparationEvents=null;preparationIndicator.clear();preparationClocks=[];hasPreparationWorkflow=false;incidentReminder.update([],settings.siteName);
  if(modal.open)modal.close();modal.innerHTML='';
  profileLoaded=false;data=null;accountAccess=null;document.querySelector('#navigation').innerHTML='';document.querySelector('#breadcrumb').textContent='Acceso al inventario';document.querySelector('.live').innerHTML='<i></i> Acceso protegido';
  renderAuthScreen({main,cloud,getSettings:()=>settings,onAppearance:setAuthAppearance,onReady:load,message});if(cloud.hasSession())installLogout();
 }
-function renderWaitingAccount(){preparationIndicator.clear();preparationClocks=[];hasPreparationWorkflow=false;incidentReminder.update([],settings.siteName);
+function renderWaitingAccount(){preparationEvents=null;preparationIndicator.clear();preparationClocks=[];hasPreparationWorkflow=false;incidentReminder.update([],settings.siteName);
  if(modal.open)modal.close();modal.innerHTML='';
  data=null;profileLoaded=false;document.querySelector('#navigation').innerHTML='';document.querySelector('#breadcrumb').textContent='Autorización de cuenta';document.querySelector('.live').innerHTML='<i></i> Acceso pendiente';
  installLogout();renderPendingAccount({main,access:accountAccess,getSettings:()=>settings,onAppearance:setAuthAppearance,onRefresh:load,onSignOut:()=>document.querySelector('#logout').click(),onVerify:()=>renderAuthScreen({main,cloud,getSettings:()=>settings,onAppearance:setAuthAppearance,onReady:load,phase:'verify',email:accountAccess.email})});
@@ -366,7 +370,8 @@ async function downloadIncident(id){
 }
 function preparationRows(){return (data.preparations||[]).filter(p=>p.date.slice(0,7)===month&&`${p.folio} ${p.np} ${p.supplies} ${p.product} ${p.notes}`.toLowerCase().includes(query.toLowerCase())).sort((a,b)=>a.date.localeCompare(b.date)||a.start_time.localeCompare(b.start_time));}
 let preparationTab='queue';
-let preparationMachine='',preparationResponsible='';
+let preparationMachine='',preparationResponsible='',preparationProductionType='';
+let preparationEvents=null;
 function pantoneRequestsMarkup(){
  const requests=(data.pantone_requests||[]).filter(r=>{const order=data.orders.find(o=>o.id===r.order_id);return order&&order.date.slice(0,7)===month&&`${order.folio} ${r.pantone}`.toLowerCase().includes(query.toLowerCase());});
  return `<section class="panel"><div class="panel-heading"><div><h2>Solicitudes de Pantone</h2><p>Registra los gramos obtenidos y la receta. Se descuentan ingredientes y se ingresa la mezcla.</p></div></div>${table(['ORDEN','POSICIÓN','PANTONE','ESTADO','GRAMOS OBTENIDOS',''],requests.map(r=>{const o=data.orders.find(o=>o.id===r.order_id);return `<tr><td>${esc(o.folio)}</td><td>${r.slot}</td><td>${esc(r.pantone)}</td><td>${o.status==='cancelled'?'Orden cancelada':r.status==='completed'?'Preparado':'Pendiente'}</td><td>${r.output_grams==null?'—':num(r.output_grams)}</td><td><button class="btn ${r.status==='completed'?'':'primary'}" data-pantone="${r.id}" ${o.status==='cancelled'&&r.status!=='completed'?'disabled':''}>${r.status==='completed'?'Ver receta':'Preparar color'}</button></td></tr>`;}).join(''))}${requests.length?'':'<p class="notice">Las solicitudes aparecerán cuando seleccionen Pantone en la página de captura.</p>'}</section>`;
@@ -379,7 +384,8 @@ function preparationIndicators(orders){
  const people=new Map(rows.filter(row=>row.clock.responsible).map(({clock})=>[clock.responsible,clock.responsible_name||clock.responsible]));
  const peopleOptions='<option value="">Todos</option>'+[...people.entries()].sort((a,b)=>a[1].localeCompare(b[1],'es')).map(([id,name])=>
   `<option value="${esc(id)}" ${id===preparationResponsible?'selected':''}>${esc(name)}</option>`).join('');
- const selected=rows.filter(({order,clock})=>(!preparationMachine||order.machine===preparationMachine)&&
+ const orderType=order=>order.specifications?.production_plan?.production_type||'legacy';
+ const selected=rows.filter(({order,clock})=>(!preparationProductionType||orderType(order)===preparationProductionType)&&(!preparationMachine||order.machine===preparationMachine)&&
   (!preparationResponsible||clock.responsible===preparationResponsible));
  const totals={elapsed:0,effective:0,paused:0,idle:0,estimated:0,onTime:0,corrected:0,modified:0};
  for(const {order,clock} of selected){
@@ -392,15 +398,39 @@ function preparationIndicators(orders){
    if(timing.effective<=Number(clock.estimated_minutes)*60)totals.onTime++;
   }
  }
- const metrics=[['Preparaciones',selected.length],['Promedio efectivo',selected.length?num(totals.effective/selected.length/60)+' min':'—'],
+ const averages=Object.entries({...productionTypes,legacy:'Sin clasificar'}).flatMap(([kind,label])=>{
+  const group=selected.filter(({order})=>orderType(order)===kind);
+  return group.length?[[`Promedio efectivo · ${label}`,num(group.reduce((sum,{order,clock})=>sum+preparationTiming(order,clock).effective,0)/group.length/60)+' min']]:[];
+ });
+ const metrics=[['Preparaciones',selected.length],...averages,
   ['Total transcurrido',num(totals.elapsed/60)+' min'],['Tiempo efectivo',num(totals.effective/60)+' min'],
   ['Pausas',num(totals.paused/60)+' min'],['Tiempo improductivo corregido',num(totals.idle/60)+' min'],
   ['Órdenes modificadas durante la preparación',totals.modified],['Órdenes con corrección de tiempo',totals.corrected],
   ['Dentro del tiempo estimado',totals.estimated?`${totals.onTime} de ${totals.estimated}`:'—']];
+ const merged=preparationEvents?.month===month?preparationEvents.orders:[];
+ const scope=orders.filter(order=>(!preparationMachine||order.machine===preparationMachine)&&
+  (!preparationProductionType||orderType(order)===preparationProductionType)&&
+  (!preparationResponsible||byId.get(order.id)?.responsible===preparationResponsible));
+ const scopeIds=new Set(scope.map(order=>order.id));
+ const signals=merged.filter(row=>scopeIds.has(row.id));
+ if(preparationEvents?.month===month&&!preparationEvents.pending&&!preparationEvents.error)metrics.push(
+  ['Tiempo con faltantes registrados',num(signals.reduce((sum,row)=>sum+Number(row.wait_seconds),0)/60)+' min'],
+  ['Órdenes con faltantes',signals.filter(row=>row.material_shortage).length],
+  ['Errores de captura registrados',signals.filter(row=>row.input_error).length],
+  ['Órdenes con incompatibilidad de suaje',signals.filter(row=>row.incompatible).length]
+ );
+ const split=field=>[...selected.reduce((groups,row)=>{
+  const key=field(row);
+  return groups.set(key,(groups.get(key)||0)+1);
+ },new Map())].map(([label,count])=>`<tr><td>${esc(label)}</td><td>${count}</td></tr>`).join('');
  return `<section class="panel"><div class="panel-heading"><div><h2>Indicadores de preparación</h2><p>Registros del cronómetro con tiempos detallados · ${esc(monthLabel(month))}</p></div></div>
   <div class="toolbar">${selectField('Máquina','prep_machine',options(machines,preparationMachine,'Todas'))}
-   ${selectField('Responsable','prep_responsible',peopleOptions)}</div>
-  ${table(['INDICADOR','RESULTADO'],metrics.map(([key,value])=>`<tr><td>${esc(key)}</td><td>${esc(value)}</td></tr>`).join(''))}</section>`;
+   ${selectField('Responsable','prep_responsible',peopleOptions)}
+   ${selectField('Tipo de producción','prep_production_type','<option value="">Todos</option>'+Object.entries({...productionTypes,legacy:'Sin clasificar'}).map(([kind,label])=>`<option value="${kind}" ${kind===preparationProductionType?'selected':''}>${label}</option>`).join(''))}</div>
+  ${table(['INDICADOR','RESULTADO'],metrics.map(([key,value])=>`<tr><td>${esc(key)}</td><td>${esc(value)}</td></tr>`).join(''))}
+  ${table(['MÁQUINA','PREPARACIONES'],split(({order})=>order.machine||'Sin máquina'))}
+  ${table(['RESPONSABLE','PREPARACIONES'],split(({clock})=>clock.responsible_name||'Sin responsable verificado'))}
+  <p class="form-hint" id="prep-event-status">${preparationEvents?.month===month&&!preparationEvents.pending?(preparationEvents.error?'Los indicadores de faltantes y compatibilidad no están disponibles.':'Los tiempos con faltantes pueden coincidir con una pausa registrada.'):'Cargando indicadores de faltantes y compatibilidad…'}</p></section>`;
 }
 function preparations(){
  const all=trackedOrders(),prepared=all.filter(o=>o.ended_at&&o.status!=='cancelled'),queue=all.filter(o=>!o.ended_at&&o.status!=='cancelled'),seconds=prepared.reduce((sum,o)=>{const clock=preparationClocks.find(item=>item.order_id===o.id);return sum+(!hasPreparationWorkflow||clock?preparationTiming(o,clock).effective:0);},0),pending=(data.pantone_requests||[]).filter(r=>r.status==='pending'&&all.some(o=>o.id===r.order_id&&o.status!=='cancelled'));
@@ -444,8 +474,21 @@ function dieUsageView(){const pleca=view==='plecas',label=pleca?'pleca':'suaje',
 function cuts(){const saved=data.cuts.find(c=>c.month===month),rows=(saved?saved.snapshot:monthlyRows()).filter(l=>l.category==='tinta'),inks=rows.filter(l=>l.category==='tinta'),closed=!!saved,noHistory=month<data.baseline.slice(0,7);const filtered=rows.filter(l=>`${l.name} ${l.code} ${l.lot}`.toLowerCase().includes(query.toLowerCase()));return header('CIERRE Y CONTROL MENSUAL','Cada mes, cuentas claras.','Corte de tintas: saldos, ingresos y egresos del mes en gramos.',button('Exportar corte PDF','export','download')+button(closed?'Mes cerrado':'Cerrar mes','close-month','calendar',true,closed?'disabled':''))+`<section class="stats">${stat('Existencia inicial',num(decimalSum(inks.map(l=>l.opening))),'g','Saldo inicial registrado','box')}${stat('Ingresos del mes',num(decimalSum(inks.map(l=>l.incoming))),'g','Entradas y devoluciones','arrows')}${stat('Egresos del mes',num(decimalSum(inks.map(l=>l.outgoing))),'g','Salidas y producción','arrows')}${stat('Existencia final',num(decimalSum(inks.map(l=>l.closing))),'g','Inicial + ingresos − egresos','check')}</section><section class="panel"><div class="panel-heading"><div><h2>${closed?'Corte definitivo':'Resumen del mes'}</h2><p>${monthLabel(month)}</p></div>${monthInput()}</div><div class="cut-info">${noHistory?'No hay historia anterior a la carga inicial del '+displayDate(data.baseline)+'.':closed?`<strong>Mes cerrado.</strong> Este corte conserva los saldos al cierre y bloquea movimientos en el período.`:`<strong>Resumen en curso.</strong> El corte definitivo está disponible al terminar el mes. La carga inicial se considera saldo de apertura; no reconstruye movimientos anteriores al ${displayDate(data.baseline)}.`}</div><div class="toolbar">${search()}<span class="spacer"></span><span class="status ${closed?'':'neutral'}">${closed?'Cerrado':'Sin cierre definitivo'}</span></div>${noHistory?empty('No hay movimientos históricos','El piloto inicia con las existencias del PDF.'):table(['TINTA','LOTE','INICIAL','INGRESOS','EGRESOS','FINAL','VALOR FINAL'],slice(filtered).map(l=>`<tr><td>${ink(l)}</td><td>${esc(l.lot)}</td><td>${num(l.opening)}</td><td>${num(l.incoming)}</td><td>${num(l.outgoing)}</td><td class="stock ${l.closing<0?'negative':''}">${num(l.closing)} <span class="unit">${l.category==='tinta'?'g':'pzas'}</span></td><td>${money(l.closing*l.cost_kg/(l.category==='tinta'?1000:1))}</td></tr>`).join(''))}${noHistory?'':pager(filtered.length)}</section>`}
 function bind(){
  if(view==='preparacion'){
+  if(preparationTab==='indicators'&&hasPreparationWorkflow&&preparationEvents?.month!==month){
+   const request={month,orders:[],pending:true};
+   preparationEvents=request;
+   cloud.preparationIndicatorEvents({month:request.month}).then(result=>{
+    Object.assign(request,{orders:result.orders,pending:false});
+   }).catch(()=>{
+    Object.assign(request,{error:true,pending:false});
+   }).finally(()=>{
+    if(preparationEvents===request&&view==='preparacion'&&preparationTab==='indicators'&&month===request.month&&data)render();
+   });
+  }
   const machine=main.querySelector('[name="prep_machine"]');
   const responsible=main.querySelector('[name="prep_responsible"]');
+  const type=main.querySelector('[name=prep_production_type]');
+  if(type)type.onchange=()=>{preparationProductionType=type.value;render();};
   if(machine)machine.onchange=()=>{preparationMachine=machine.value;render();};
   if(responsible)responsible.onchange=()=>{preparationResponsible=responsible.value;render();};
  }
@@ -475,6 +518,10 @@ function movementForm(type,mode='existing',fixedLot,category){
 
 function orderForm(existingId=null){
  const existing=existingId?data.orders.find(o=>o.id===existingId):null;
+ if(cloud&&(existing?.specifications?.production_plan?.production_type==='cut'||existing?.specifications?.production_plan?.white_process==='material')){
+  orderDetail(existing.id);
+  return;
+ }
  const eligible=data.lots.filter(l=>l.category==='tinta'&&(l.grams>0||existing?.lines.some(i=>i.lot_id===l.id)));
  if(!eligible.length){toast('No hay lotes de tinta con existencia disponible.');return;}
  show(existing?'Completar registro de producción':'Nuevo registro de producción','Captura los pesos como en tu hoja. El consumo se calcula automáticamente.',`<div class="form-grid production-fields">${field('Orden / órdenes de producción','folio','text',existing?.folio||`OP-${data.today.slice(0,4)}-${String(data.orders.length+1).padStart(5,'0')}`,'required maxlength="100"')}${field('Fecha','date','date',existing?.date||data.today,`required min="${data.baseline}" max="${data.today}"`)}${field('Prensista','pressman','text',existing?.pressman||'','required maxlength="100"')}${field('Producto','product','text',existing?.product||'','required maxlength="150"')}${field('Cliente (opcional)','client','text',existing?.client||'','maxlength="150"')}${field('Metros corridos reales de la orden','run_meters','number','','min="0" step="any" required')}${selectField('Guardar como','status','<option value="confirmed">Confirmado · descontar consumo</option><option value="draft">Pendiente · sin descontar inventario</option>')}</div><div class="section-label">TINTAS Y PESOS · CANTIDADES EN GRAMOS</div><div class="order-lines-scroll"><div id="order-lines"></div></div><button type="button" class="btn" id="add-line">${icon('plus')}Agregar tinta</button><div class="cost-preview">Consumo calculado<strong id="order-total">0 g · $0.00</strong></div><label class="field" style="margin-top:17px">Notas generales<textarea name="notes" maxlength="1000">${esc(existing?.notes||'')}</textarea></label>${existing?orderCommentsPanel():''}<p class="form-hint">Ingreso es el peso inicial y egreso el peso final o devuelto. No son dos movimientos de inventario: se descuenta únicamente la diferencia al confirmar. Al confirmar, captura los metros reales totales de la orden: se cuentan una sola vez para el suaje y la pleca relacionados. Si falta el peso final, guarda como pendiente. Los lotes vencidos se señalan para revisión.</p>`,'Guardar registro',async f=>{
@@ -541,17 +588,96 @@ function bindPreparationChecklist(order){
 function orderDetail(id){
  const o=data.orders.find(o=>o.id===id),specs=o.specifications||{};
  const clock=preparationClocks.find(item=>item.order_id===id);
+ const withoutInk=specs.production_plan?.production_type==='cut'||specs.production_plan?.white_process==='material';
  const timing=clock&&preparationTiming(o,clock);
  const summary=timing?`<p class="form-hint">${num(timing.elapsed/60)} min transcurridos · ${num(timing.effective/60)} min efectivos · ${num(timing.paused/60)} min de pausa · ${num(timing.idle/60)} min improductivos</p>`:'';
 
- const dataFields=[['NP',o.np||[...new Set(o.lines.map(l=>l.np))].join(', ')],['Prensista',o.pressman],['Máquina',o.machine],['Secuencia',o.queue_number?String(o.queue_number):''],['Cliente',o.client],['Producto',o.product],['Piezas solicitadas',o.pieces==null?'':num(o.pieces)],['Metros solicitados',o.planned_meters==null?'':num(o.planned_meters)],['Fecha programada',o.scheduled_date?displayDate(o.scheduled_date):''],['Horario programado',[o.scheduled_start,o.scheduled_end].filter(Boolean).map(value=>formatWallTime(value,settings)).join(' → ')],['Inicio real',productionTime(o.started_at)],['Fin real',productionTime(o.ended_at)],['Fecha solicitada',o.specifications?.production_plan?.required_date||''],['Prioridad actual',effectivePriority(o.specifications?.production_plan||{},settings)],...Object.entries(specs).filter(([key])=>!key.endsWith('_id')&&key!=='production_plan')];
- show(esc(o.folio),`${esc(o.product||o.client)} · ${displayDate(o.date)}`,`<div class="incident-clock-panel"><small>Tiempo de preparación</small>${orderClockMarkup(o)}<span>${preparationState(o,clock)}</span></div>${summary}<div class="notice">${o.status==='cancelled'?'Registro cancelado. Los consumos confirmados fueron devueltos.':o.status==='draft'?'Pendiente. No se ha descontado inventario.':'Registro confirmado. El consumo ya fue descontado.'}</div><div class="detail-grid">${dataFields.map(([label,value])=>`<div><small>${esc(label)}</small><strong>${esc(value||'—')}</strong></div>`).join('')}</div>${o.lines.length?productionTable(productionRows([o])):'<p class="notice">Orden recibida. Captura las tintas y sus pesos cuando estén disponibles.</p>'}${o.ended_at&&o.status!=='cancelled'&&(!cloud||accountAccess?.is_admin||accountAccess?.permissions?.some(p=>['production','preparation'].includes(p)))?'<button type="button" class="btn" id="open-press-order">Hoja para prensista</button>':''}${o.status==='draft'&&(o.ended_at||o.lines.length)?'<button type="button" class="btn primary" id="capture-order-weights">Capturar / completar tintas y pesos</button>':''}<p class="form-hint">${esc(o.notes||'Sin notas generales.')}</p>${hasPreparationWorkflow&&accountAccess.is_admin&&o.ended_at&&o.status!=='cancelled'?'<button type="button" class="btn" id="preparation-correction">Corregir tiempos</button>':''}${hasPreparationWorkflow&&accountAccess.is_admin&&o.status==='draft'&&!o.ended_at?'<button type="button" class="btn" id="edit-preparation-order">Editar planeación</button>':''}${preparationChecklist(clock)}${orderCommentsPanel()}`,o.status!=='cancelled'?'Cancelar orden':'',async()=>{await post('orders/cancel',{id});toast('Orden cancelada. Se conservaron sus fechas y movimientos.');});
+ const dataFields=[['Tipo de producción',productionTypes[specs.production_plan?.production_type]],['NP',o.np||[...new Set(o.lines.map(l=>l.np))].join(', ')],['Prensista',o.pressman],['Máquina',o.machine],['Secuencia',o.queue_number?String(o.queue_number):''],['Cliente',o.client],['Producto',o.product],['Piezas solicitadas',o.pieces==null?'':num(o.pieces)],['Metros solicitados',o.planned_meters==null?'':num(o.planned_meters)],['Fecha programada',o.scheduled_date?displayDate(o.scheduled_date):''],['Horario programado',[o.scheduled_start,o.scheduled_end].filter(Boolean).map(value=>formatWallTime(value,settings)).join(' → ')],['Inicio real',productionTime(o.started_at)],['Fin real',productionTime(o.ended_at)],['Fecha solicitada',o.specifications?.production_plan?.required_date||''],['Prioridad actual',effectivePriority(o.specifications?.production_plan||{},settings)],...Object.entries(specs).filter(([key])=>!key.endsWith('_id')&&key!=='production_plan')];
+ show(esc(o.folio),`${esc(o.product||o.client)} · ${displayDate(o.date)}`,`<div class="incident-clock-panel"><small>Tiempo de preparación</small>${orderClockMarkup(o)}<span>${preparationState(o,clock)}</span></div>${summary}<div class="notice">${o.status==='cancelled'?'Registro cancelado. Los consumos confirmados fueron devueltos.':o.status==='draft'?'Pendiente. No se ha descontado inventario.':'Registro confirmado. El consumo ya fue descontado.'}</div><div class="detail-grid">${dataFields.map(([label,value])=>`<div><small>${esc(label)}</small><strong>${esc(value||'—')}</strong></div>`).join('')}</div>${o.lines.length?productionTable(productionRows([o])):withoutInk?'<p class="notice">Orden sin impresión.</p>':'<p class="notice">Orden recibida. Captura las tintas y sus pesos cuando estén disponibles.</p>'}${o.ended_at&&o.status!=='cancelled'&&(!cloud||accountAccess?.is_admin||accountAccess?.permissions?.some(p=>['production','preparation'].includes(p)))?'<button type="button" class="btn" id="open-press-order">Hoja para prensista</button>':''}${o.status==='draft'&&(o.ended_at||o.lines.length)?(withoutInk?'<button type="button" class="btn primary" id="close-without-ink">Confirmar metros de corte</button>':'<button type="button" class="btn primary" id="capture-order-weights">Capturar / completar tintas y pesos</button>'):''}<p class="form-hint">${esc(o.notes||'Sin notas generales.')}</p>${hasPreparationWorkflow&&can('preparation_correct')&&o.ended_at&&o.status!=='cancelled'?'<button type="button" class="btn" id="preparation-correction">Corregir tiempos</button>':''}${hasPreparationWorkflow&&can('preparation_edit')&&o.status==='draft'&&!o.ended_at?'<button type="button" class="btn" id="edit-preparation-order">Editar planeación</button>':''}${hasPreparationWorkflow&&can('preparation_edit')&&o.status==='draft'&&o.ink_selections?.some(ink=>ink.product_id)?'<button type="button" class="btn" id="reserve-preparation-inks">Reservar tintas</button>':''}${hasPreparationWorkflow&&can('preparation_handoff')&&o.ended_at&&o.status!=='cancelled'&&!clock?.handed_off_at?'<button type="button" class="btn" id="preparation-handoff">Registrar entrega a producción</button>':''}${hasPreparationWorkflow&&specs.die_id?'<section id="die-compatibility"></section>':''}${preparationChecklist(clock)}${orderCommentsPanel()}`,o.status!=='cancelled'?'Cancelar orden':'',async()=>{await post('orders/cancel',{id});toast('Orden cancelada. Se conservaron sus fechas y movimientos.');});
+ modal.querySelector('#close-without-ink')?.addEventListener('click',()=>show('Confirmar metros de corte',esc(o.folio),field('Metros reales','meters','number','','required min="0.001" max="1000000000000" step="0.001"'),'Confirmar',async form=>{
+  if(!cloud)throw Error('Esta operación requiere el flujo de Supabase.');
+  await cloud.closeWithoutInk({id:o.id,meters:form.get('meters')});
+  await load();
+  toast('Orden confirmada sin consumo de tinta.');
+ }));
  bindPreparationChecklist(o);
+ loadDieCompatibility(o);
+ modal.querySelector('#preparation-handoff')?.addEventListener('click',()=>show('Entrega a producción',esc(o.folio),'<p>Confirma que la preparación se entregó a producción.</p>','Registrar entrega',async()=>{
+  await cloud.preparationWorkflow({operation:'handoff',id:o.id});
+  await load();
+  toast('Entrega registrada.');
+ }));
+ modal.querySelector('#reserve-preparation-inks')?.addEventListener('click',()=>inkReservationForm(o));
  modal.querySelector('#edit-preparation-order')?.addEventListener('click',()=>editPreparationOrder(o));
  modal.querySelector('#preparation-correction')?.addEventListener('click',()=>preparationCorrection(o));
  modal.classList.add('wide-modal');bindOrderComments(modal,cloud,id,settings.reportName||cloud?.displayName?.()||'Usuario autorizado');modal.querySelectorAll('[data-order-detail]').forEach(el=>el.remove());modal.querySelector('#capture-order-weights')?.addEventListener('click',()=>orderForm(id));modal.querySelector('#open-press-order')?.addEventListener('click',async()=>{const target=window.open('about:blank','_blank');if(target)target.opener=null;try{const sheet=await pressSheetsRequest(cloud,{operation:'generate',order_id:id,profile:{reportName:settings.reportName,reportLogo:settings.reportLogo,timeZone:effectiveTimeZone(settings),timeFormat:settings.timeFormat}});if(target)target.location.replace(location.origin+'/hoja-prensista.html#key='+sheet.access_key);else location.hash='hojas';}catch(e){target?.close();toast(e.message);}});
 }
 
+
+async function inkReservationForm(order){
+ try{
+  const {revision,reservations,lots}=await cloud.inkReservations({operation:'get',id:order.id});
+  const held=new Map(reservations.map(row=>[row.lot_id,row.grams]));
+  if(!lots.length){toast('Las tintas de la orden aún no tienen lotes registrados.');return;}
+  const rows=lots.map(lot=>`<tr><td>${esc(lot.name)}</td><td>${esc(lot.lot)}</td><td>${num(lot.available)} g</td><td><input type="number" name="lot_${lot.id}" aria-label="Gramos reservados de ${esc(lot.lot)}" value="${held.get(lot.id)??''}" min="0" max="${lot.available}" step="0.001"></td></tr>`).join('');
+  show('Reservar tintas',esc(order.folio),`<p class="form-hint">Captura gramos por lote. Deja vacío para liberar su reserva. El consumo se registra al confirmar los pesajes.</p>${table(['TINTA','LOTE','DISPONIBLE','RESERVA (g)'],rows)}${field('Motivo','reason','text','','required maxlength="1000"')}`,'Guardar reservas',async form=>{
+   const reservations=lots.map(lot=>({lot_id:lot.id,grams:form.get('lot_'+lot.id)})).filter(row=>Number(row.grams)>0);
+   await cloud.inkReservations({operation:'save',id:order.id,revision,reservations,reason:form.get('reason')});
+   toast('Reservas actualizadas.');
+  });
+ }catch(error){toast(error.message);}
+}
+
+async function loadDieCompatibility(order){
+ const section=modal.querySelector('#die-compatibility');
+ if(!section)return;
+ try{
+  const result=await cloud.dieMaterial({operation:'get',id:order.id});
+  if(!section.isConnected)return;
+  if(result.status==='compatible'){
+   section.innerHTML='<p class="notice">Compatibilidad registrada para este material.</p>';
+  }else if(result.status==='incompatible'){
+   section.innerHTML=`<div class="notice"><strong>ADVERTENCIA: SUAJE NO COMPATIBLE CON EL MATERIAL</strong>
+    <p>El suaje seleccionado no está registrado como compatible con el material solicitado en esta orden de producción.</p>
+    <p>Utilizar calzas para compensar una diferencia de altura puede incrementar excesivamente la presión de corte, provocando deformación o achatamiento del filo, desgaste prematuro del suaje, daños en el liner y problemas de calidad.</p>
+    <p>Antes de continuar, se recomienda verificar las especificaciones del suaje, consultar al responsable técnico y evaluar si es necesario utilizar otro suaje, realizar un ajuste autorizado o enviarlo a evaluación para reafile.</p></div>`;
+  }else section.innerHTML='<p class="notice">Compatibilidad no verificada</p>';
+  if(!result.applicable)return;
+  const names={warning:'Incompatibilidad',unverified:'Compatibilidad sin verificar',review:'Revisión técnica solicitada',resharpen:'Evaluación para reafile solicitada',authorized:'Autorización',rule:'Dictamen técnico'};
+  if(result.events.length) section.insertAdjacentHTML('beforeend',`<details><summary>Historial de compatibilidad</summary>${table(['FECHA','ACCIÓN','MOTIVO'],result.events.map(event=>`<tr><td>${esc(formatTimestamp(event.recorded_at,settings))}</td><td>${esc(names[event.decision])}</td><td>${esc(event.reason||'—')}</td></tr>`).join(''))}</details>`);
+  if(order.status==='draft'&&!order.ended_at&&can('preparation_edit')){
+   const change=document.createElement('button');
+   change.type='button';
+   change.className='btn';
+   change.textContent='Cambiar suaje';
+   change.onclick=()=>editPreparationOrder(order);
+   section.append(change);
+  }
+  if(result.alternatives.length) section.insertAdjacentHTML('beforeend',`<details><summary>Ver suajes compatibles</summary><ul>${result.alternatives.map(tool=>`<li>${esc(tool.code)} · ${esc(tool.name)}</li>`).join('')}</ul></details>`);
+  if(order.ended_at||order.status==='cancelled')return;
+  const actions=[['review','Solicitar revisión técnica'],['resharpen','Solicitar evaluación para reafile']];
+  if(accountAccess.is_admin){
+   actions.push(['rule','Registrar dictamen técnico']);
+  }
+  if(result.status==='incompatible'&&can('die_authorize'))actions.push(['authorized','Continuar bajo autorización']);
+  const controls=document.createElement('div');
+  controls.className='actions';
+  for(const [operation,label] of actions){
+   const control=document.createElement('button');
+   control.type='button';
+   control.className='btn';
+   control.textContent=label;
+   control.onclick=()=>show(label,esc(order.folio),`${operation==='rule'?selectField('Resultado','assessment','<option value="yes">Compatible</option><option value="no">Incompatible</option>'):''}${field(operation==='rule'?'Fundamento técnico':'Motivo','reason','text','','required maxlength="1000"')}`,'Guardar',async form=>{
+    await cloud.dieMaterial({operation,id:order.id,reason:form.get('reason'),compatible:form.get('assessment')==='yes'});
+    toast('Decisión registrada.');
+   });
+   controls.append(control);
+  }
+  section.append(controls);
+ }catch(error){
+  if(section.isConnected&&error.code!=='DIE_COMPATIBILITY_REQUIRED')section.textContent=error.message;
+ }
+}
 
 async function editPreparationOrder(order){
  try{
@@ -559,8 +685,12 @@ async function editPreparationOrder(order){
    cloud.preparationWorkflow({operation:'edit_fields',id:order.id}),
    cloud.preparationWorkflow({operation:'history',id:order.id})
   ]);
+  let inkEditor;
+  const cut=order.specifications?.production_plan?.production_type!=='print';
+  const bare=['cut','material'].includes(order.specifications?.production_plan?.white_process||order.specifications?.production_plan?.production_type);
+  const tools=(prefix,selected)=>'<option value="">Sin selección</option>'+data.products.filter(product=>product.category==='herramental'&&product.code.startsWith(prefix)).map(product=>`<option value="${product.id}" ${String(product.id)===selected?'selected':''}>${esc(product.code)} · ${esc(product.name)}</option>`).join('');
   const headers=['FECHA','USUARIO','MOTIVO','ANTES','DESPUÉS'];
-  const describe=value=>[value.machine,value.required_date,value.priority,value.estimated_minutes&&value.estimated_minutes+' min',value.notes].filter(Boolean).join(' · ');
+  const describe=value=>[value.machine,value.required_date,value.priority,value.estimated_minutes&&value.estimated_minutes+' min',value.die_id,value.crease_id,value.material_code,value.plates,value.requested_thousands,value.notes].filter(Boolean).join(' · ');
   const rows=history.filter(event=>event.operation==='edit_order').map(event=>'<tr>'+[
    formatTimestamp(event.recorded_at,settings),event.actor,event.reason,describe(event.before_value),describe(event.after_value)
   ].map(value=>`<td>${esc(value)}</td>`).join('')+'</tr>').join('');
@@ -569,14 +699,32 @@ async function editPreparationOrder(order){
    ${field('Fecha de entrega','required_date','date',fields.required_date||'','required')}
    ${selectField('Prioridad','priority',options(priorities,fields.priority||'Normal','Selecciona prioridad'))}
    ${field('Preparación estimada (min)','estimated_minutes','number',fields.estimated_minutes||'','min="1" max="1440" step="1"')}
+   ${cut?selectField('Suaje','die_id',tools('SJ',fields.die_id))+selectField('Pleca','crease_id',tools('PD',fields.crease_id)):''}
+   ${field('Código de material','material_code','text',fields.material_code||'','maxlength="200"')}
+   ${bare?'':field('Placas o clichés','plates','text',fields.plates||'','maxlength="200"')}
+   ${field('Millares solicitados','requested_thousands','number',fields.requested_thousands??'','min="0.001" max="1000000000" step="any"')}
    ${field('Observaciones','notes','text',fields.notes||'','maxlength="1000"')}
    ${field('Motivo de la modificación','reason','text','','required maxlength="1000"')}
-   </div>${rows?table(headers,rows):''}`,'Guardar cambios',async form=>{
-    const {reason,...fields}=Object.fromEntries(form);
+   </div>${bare||order.lines.length?'':`<label><input type="checkbox" id="replace-preparation-inks"> Editar tintas y Pantones</label><fieldset id="preparation-ink-fields" hidden disabled><input type="hidden" name="colors"><div id="preparation-ink-picker"></div></fieldset>`}
+   ${rows?table(headers,rows):''}`,'Guardar cambios',async form=>{
+    const {reason,colors,...fields}=Object.fromEntries(form);
+    if(modal.querySelector('#replace-preparation-inks')?.checked)fields.ink_selections=inkEditor.value();
     await cloud.preparationWorkflow({operation:'edit_order',id:order.id,revision,fields,reason});
     await load();
     toast('Planeación actualizada.');
    });
+  const toggle=modal.querySelector('#replace-preparation-inks');
+  if(toggle)toggle.onchange=()=>{
+   const group=modal.querySelector('#preparation-ink-fields');
+   group.hidden=!toggle.checked;
+   group.disabled=!toggle.checked;
+   if(!toggle.checked||inkEditor)return;
+   const products=data.products.filter(product=>product.category==='tinta').map(product=>({
+    ...product,available:data.lots.some(lot=>lot.product_id===product.id&&lot.grams>0)
+   }));
+   inkEditor=mountInkPicker(group.querySelector('#preparation-ink-picker'),modal.querySelector('[name=machine]'),products);
+   inkEditor.restore(fields.ink_selections);
+  };
  }catch(error){toast(error.message);}
 }
 

@@ -85,5 +85,91 @@ assert.equal(raw.started_at.toISOString(),started);
 assert.equal(raw.ended_at.toISOString(),ended);
 await db.exec('set role anon');
 await assert.rejects(workflow('list'),/permission denied/);
-console.log('Validado: reejecución, persistencia, exclusión, permisos, versiones, pausa, cancelación y auditoría.');
+await db.exec('reset role');
+for(const file of ['production-types.sql','die-compatibility.sql','ink-reservations.sql','preparation-indicators.sql']){
+ const sql=readFileSync(new URL('../supabase/'+file,import.meta.url),'utf8');
+ await db.exec(sql);
+ await db.exec(sql);
+}
+const key='op_'+'a'.repeat(64);
+await db.query("insert into public.prisma_order_portal_access(id,token_hash,enabled) values(1,encode(sha256(convert_to($1,'UTF8')),'hex'),true) on conflict(id) do update set token_hash=excluded.token_hash,enabled=true",[key]);
+const cutDie=(await db.query("select id from public.prisma_products where code like 'SJ%' limit 1")).rows[0].id;
+const shared={
+ capture_version:2,production_type:'cut',folio:'TYPE-CUT',np:'NP',product:'Etiqueta',pressman:'Julio Rocha',rewind_operator:'AA',
+ machine:'Comco 1',scheduled_date:'2026-11-24',scheduled_start:'08:00',requested_thousands:10,pieces:10000,
+ reel_meters:1500,expected_bobina_minutes:10,expected_production_minutes:20,finish:'Sin acabado',has_crease:'no',die_id:cutDie,
+ turns_machine_1:'NA',turns_machine_2:'NA',turns_machine_3:'NA',required_date:'2026-11-30',priority:'Normal',category:'Etiqueta',
+ scrap_target:5,width_mm:100,height_mm:50,labels_per_roll:1000,core_diameter:76,outer_diameter:170,rolls_per_box:6,
+ expected_rewind_minutes:30,material_surface:'BOPP',material_adhesive:'Permanente',material_liner:'Kraft',material_code:'MAT-PRUEBA',
+ core_material:'Cartón',box_size:'400x300',bag:'Sí',meters:100,assigned_reels:[{identifier:'B1',lot:'L1',width_mm:200,meters:100}],
+ ink_selections:[],colors:''
+};
+const portal=async payload=>(await db.query('select public.prisma_order_portal($1,$2::jsonb) as value',[key,JSON.stringify(payload)])).rows[0].value;
+const request_key='00000000-0000-4000-8000-000000000001';
+await db.exec('set role anon');
+assert.equal((await portal({operation:'catalog'})).production_types_version,1);
+await assert.rejects(portal({operation:'submit',request_key,order:{...shared,production_type:undefined}}),/tipo de producción/);
+await assert.rejects(portal({operation:'submit',request_key,order:{...shared,ink_selections:[{slot:1,pantone:'123'}]}}),/no admite/);
+const captured=await portal({operation:'submit',request_key,order:shared});
+assert.equal((await portal({operation:'submit',request_key,order:shared})).id,captured.id);
+const print=await portal({operation:'submit',request_key:'00000000-0000-4000-8000-000000000002',order:{
+ ...shared,folio:'TYPE-PRINT',production_type:'print',die_id:null,plates:'PLC-1',ink_selections:[{slot:1,pantone:'123',ink_family:'UV'}]
+}});
+await db.exec('reset role');
+const records=(await db.query("select id,specifications,ink_selections from public.prisma_orders where folio like 'TYPE-%' order by id")).rows;
+assert.equal(records[0].specifications.production_plan.production_type,'cut');
+assert.equal(records[0].specifications.colores,'');
+assert.deepEqual(records[0].ink_selections,[]);
+assert.equal(records[1].specifications.placas,'PLC-1');
+assert.equal(records[1].specifications.die_id,undefined);
+assert.equal((await db.query('select count(*)::int as count from public.prisma_pantone_requests where order_id=$1',[print.id])).rows[0].count,1);
+const compatibility=(operation,extras={})=>rpc('die_material',{operation,id:captured.id,...extras});
+await user(a);
+assert.equal((await compatibility('get')).status,'unverified');
+await compatibility('rule',{compatible:false,reason:'Evaluación técnica de prueba'});
+await assert.rejects(run('start',captured.id),/SUAJE NO COMPATIBLE/);
+await user(b);
+await assert.rejects(compatibility('authorized',{reason:'Prueba'}),/permiso/);
+await user(a);
+await compatibility('authorized',{reason:'Excepción documentada'});
+await run('start',captured.id);
+assert.ok((await compatibility('get')).events.some(event=>event.decision==='authorized'));
+const cutClock=(await workflow('list')).clocks.find(clock=>clock.order_id===captured.id);
+await workflow('check_item',{id:captured.id,version:cutClock.version,key:cutClock.items[0].key,status:'unavailable'});
+await run('finish',captured.id,cutClock.version+1);
+await db.exec('reset role');
+const cutMonth=(await db.query("select to_char(date,'YYYY-MM') as month from public.prisma_orders where id=$1",[captured.id])).rows[0].month;
+await user(a);
+const events=(await rpc('preparation_indicator_events',{month:cutMonth})).orders.find(order=>order.id===captured.id);
+assert.equal(events.material_shortage,true);
+assert.equal(events.incompatible,true);
+await workflow('handoff',{id:captured.id});
+await workflow('handoff',{id:captured.id});
+assert.ok((await workflow('list')).clocks.find(c=>c.order_id===captured.id).handed_off_at);
+await rpc('close_without_ink',{id:captured.id,meters:75});
+await rpc('close_without_ink',{id:captured.id,meters:75});
+await db.exec('reset role');
+const inkLot=(await db.query("select l.id,l.product_id,l.grams from public.prisma_lots l join public.prisma_products p on p.id=l.product_id where p.category='tinta' and l.grams>20 limit 1")).rows[0];
+await user(a);
+const printEdit=await workflow('edit_fields',{id:print.id});
+await workflow('edit_order',{id:print.id,revision:printEdit.revision,reason:'Cambio de color',fields:{
+ ...printEdit.fields,ink_selections:[{slot:1,product_id:inkLot.product_id,pantone:''}]
+}});
+const reserve=(operation,payload={})=>rpc('manage_ink_reservations',{operation,id:print.id,...payload});
+const reservation=await reserve('get');
+const hold={revision:reservation.revision,reason:'Producción programada',reservations:[{lot_id:inkLot.id,grams:10}]};
+await reserve('save',hold);
+await assert.rejects(reserve('save',hold),/cambiaron/);
+await db.exec('reset role');
+await assert.rejects(db.query('update public.prisma_lots set grams=5 where id=$1',[inkLot.id]),/reservados/);
+assert.equal((await db.query('select count(*)::int as count from public.prisma_pantone_requests where order_id=$1',[print.id])).rows[0].count,0);
+await db.query("update public.prisma_members set permissions=array_append(permissions,'preparation_edit') where user_id=$1",[b]);
+await user(b);
+const delegated=await workflow('edit_fields',{id:print.id});
+await workflow('edit_order',{id:print.id,revision:delegated.revision,reason:'Cambiar solicitud',fields:{
+ ...delegated.fields,ink_selections:[{slot:1,product_id:null,pantone:'332 C'}]
+}});
+assert.deepEqual((await reserve('get')).reservations,[]);
+await assert.rejects(workflow('correct',{id:captured.id}),/permiso/);
+console.log('Validado: cronómetro, auditoría, clasificación, autorización de suaje, reservas, permisos delegados y cierre sin tinta.');
 await db.close();
