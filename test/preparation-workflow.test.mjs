@@ -27,3 +27,28 @@ test('pause, shortages and partial checklist completion show distinct states',as
  assert.equal(preparationState(order,{items:[{status:'ready'},{status:'pending'}]}),'Preparación parcial');
  assert.equal(preparationState({...order,status:'cancelled'},{closed_at:at(2)}),'Cancelada');
 });
+
+test('correction converts profile-local times and derives the end from decimal minutes',async()=>{
+ const {preparationWallTime,preparationCorrectionValues}=await import('../public/preparation-workflow.js');
+ const zone='America/Mexico_City';
+ const original={started_at:'2026-11-19T18:46:58.321Z',ended_at:'2026-11-19T20:00:00.000Z'};
+ const local=preparationWallTime(original.started_at,zone);
+ assert.equal(local,'2026-11-19T12:46');
+ const corrected=preparationCorrectionValues({mode:'duration',started_at:local,effective_minutes:'20',paused_minutes:'2.5',idle_minutes:'0'},original,zone,Date.parse('2026-11-20'));
+ assert.equal(corrected.started_at,original.started_at);
+ assert.equal(corrected.ended_at,'2026-11-19T19:09:28.321Z');
+ assert.equal(corrected.effective_seconds,1200);
+ assert.equal(corrected.paused_seconds,150);
+});
+
+test('correction derives effective minutes from the selected end and checks the interval',async()=>{
+ const {preparationCorrectionValues,preparationMinutesLabel}=await import('../public/preparation-workflow.js');
+ const values={mode:'end',started_at:'2026-11-19T12:00',ended_at:'2026-11-19T12:30',paused_minutes:'5',idle_minutes:'2'};
+ const now=Date.parse('2026-11-20');
+ const zone='America/Mexico_City';
+ const corrected=preparationCorrectionValues(values,{},zone,now);
+ assert.equal(corrected.ended_at,'2026-11-19T18:30:00.000Z');
+ assert.equal(preparationMinutesLabel(corrected.effective_seconds),'23 min');
+ assert.throws(()=>preparationCorrectionValues({...values,paused_minutes:'40'},{},zone,now),/cubrir/);
+ assert.throws(()=>preparationCorrectionValues({...values,ended_at:'2026-11-21T12:30'},{},zone,now),/futuro/);
+});

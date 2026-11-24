@@ -1,6 +1,6 @@
 import {mountInkPicker} from './ink-picker.js';
 import {productionTypes} from './production-type.js';
-import {createPreparationIndicator, preparationTiming, preparationState} from './preparation-workflow.js';
+import {createPreparationIndicator, preparationTiming, preparationState, preparationMinutesLabel, preparationWallTime, preparationCorrectionValues} from './preparation-workflow.js';
 import {effectivePriority,priorities} from './capture-planning.js';
 import {workHistoryView,bindWorkHistory} from './work-history.js';
 import {productionAuditView,bindProductionAudit} from './production-audit.js';
@@ -256,12 +256,16 @@ function filteredProductionOrders(){return data.orders.filter(o=>o.date.slice(0,
 function orderStatus(o){return `<span class="status ${o.status==='cancelled'?'neutral':o.status==='draft'?'warning':''}">${o.status==='cancelled'?'Cancelada':o.status==='draft'?'Pendiente':'Confirmada'}</span>`;}
 function weight(v){return v===null||v===undefined?'—':num(v);}
 function productionTable(rows){return table(['ORDEN','NP','FECHA','PRENSISTA','TINTA','LOTE','INGRESO (g)','EGRESO (g)','GRAMOS TOTALES','METROS','NOTAS','PRODUCTO','ESTADO',''],rows.map(({order:o,line:l})=>`<tr><td><strong>${esc(o.folio)}</strong></td><td>${esc(l.np||'—')}</td><td>${displayDate(o.date)}</td><td>${esc(o.pressman||'—')}</td><td>${ink(l)}</td><td>${esc(l.lot)}</td><td class="mono">${weight(l.initial_grams)}</td><td class="mono">${weight(l.final_grams)}</td><td class="stock">${l.initial_grams!=null&&l.final_grams==null?'Pendiente':num(l.grams)}${o.status==='draft'?' *':''}</td><td>${weight(l.meters)}</td><td class="production-note">${esc(l.notes||o.notes||'—')}</td><td>${esc(o.product||o.client)}</td><td>${orderStatus(o)}</td><td><button class="btn" data-order-detail="${o.id}">${o.status==='draft'?'Completar':'Ver registro'}</button></td></tr>`).join(''));}
-function productionTime(value){return formatTimestamp(value,settings);}
+function productionTime(value){return formatTimestamp(value,settings,{dateStyle:'short',timeStyle:'short'});}
 function trackedOrders(){return filteredProductionOrders().filter(o=>`${o.folio} ${o.np||''} ${o.product} ${o.client} ${o.pressman} ${o.machine||''} ${o.lines.map(l=>l.np+' '+l.name+' '+l.lot).join(' ')}`.toLowerCase().includes(query.toLowerCase())).sort((a,b)=>a.id-b.id);}
-function orderClockMarkup(o){return `<strong class="mono" data-incident-start="${esc(o.started_at||'')}" data-incident-end="${esc(o.ended_at||'')}">${o.started_at?incidentClock(incidentSeconds(o)):'00:00:00'}</strong>`;}
-function productionTrackingTable(items=trackedOrders()){return '<div class="production-tracking">'+table(['ORDEN / ORIGEN','NP / PRODUCTO','PROGRAMADA','INICIO REAL','FIN REAL','TIEMPO','INVENTARIO','ACCIONES'],items.map(o=>`<tr><td data-label="${esc(t('Orden / origen'))}"><strong>${esc(o.folio)}</strong><small class="order-source">${o.source==='portal'?'Secuencia #'+String(o.queue_number).padStart(3,'0')+' · Página de captura':o.source==='teams'?'Teams · '+productionTime(o.received_at):'Captura manual'}</small></td><td data-label="${esc(t('NP / producto'))}">${esc(o.np||[...new Set(o.lines.map(l=>l.np).filter(Boolean))].join(', ')||'—')}<small class="order-source">${esc(o.product||o.client)}</small><small class="order-source">${esc([o.pressman,o.machine,o.specifications?.colores].filter(Boolean).join(' · '))}</small></td><td data-label="${esc(t('Programada'))}">${o.scheduled_date?displayDate(o.scheduled_date):'—'}<small class="order-source">${esc(o.scheduled_start?formatWallTime(o.scheduled_start,settings):'')} ${o.scheduled_end?'→ '+esc(formatWallTime(o.scheduled_end,settings)):''}</small><small class="order-source">Entrega: ${esc(o.specifications?.production_plan?.required_date||'Pendiente')} · ${esc(effectivePriority(o.specifications?.production_plan||{},settings))}</small></td><td data-label="${esc(t('Inicio real'))}">${productionTime(o.started_at)}</td><td data-label="${esc(t('Fin real'))}">${productionTime(o.ended_at)}</td><td data-label="${esc(t('Tiempo'))}">${orderClockMarkup(o)}<small class="order-source">${preparationState(o,preparationClocks.find(clock=>clock.order_id===o.id))}</small></td><td data-label="${esc(t('Inventario'))}">${orderStatus(o)}</td><td data-label="${esc(t('Acciones'))}"><div class="actions">${o.status!=='cancelled'&&!o.ended_at?`<button class="btn ${o.started_at?'':'primary'}" data-order-clock="${o.id}" data-clock-operation="${o.started_at?'finish':'start'}">${icon(o.started_at?'check':'clock')}${o.started_at?'Finalizar':'Iniciar'}</button>`:''}<button class="btn" data-order-detail="${o.id}">Ver orden</button></div></td></tr>`).join(''))+'</div>';}
-async function changeOrderClock(id,operation,button){
- const target=operation==='finish'?window.open('about:blank','_blank'):null;if(target){target.opener=null;target.document.title='Preparando orden para prensista…';}button.disabled=true;try{const result=await post('orders/clock',{id,operation,version:preparationClocks.find(clock=>clock.order_id===id)?.version,profile:{reportName:settings.reportName,reportLogo:settings.reportLogo,timeZone:effectiveTimeZone(settings),timeFormat:settings.timeFormat}});if(operation==='finish'){const sheet=result.press_sheet||await pressSheetsRequest(cloud,{operation:'generate',order_id:id});const link='/hoja-prensista.html#key='+sheet.access_key;if(target)target.location.replace(location.origin+link);toast('Preparación finalizada. Hoja guardada en Órdenes para prensistas.');if(!target){location.hash='hojas';}}else toast({pause:'Preparación en pausa.',resume:'Preparación reanudada.'}[operation]||'Orden iniciada. El tiempo continúa aunque cierres la página.');}catch(error){target?.close();toast(error.message);button.disabled=false;}
+function orderClockMarkup(o){
+ const clock=preparationClocks.find(item=>item.order_id===o.id);
+ return `<strong class="mono" data-preparation-clock="${o.id}">${preparationMinutesLabel(preparationTiming(o,clock).effective)}</strong>`;
+}
+function productionTrackingTable(items=trackedOrders()){return '<div class="production-tracking">'+table(['ORDEN / ORIGEN','NP / PRODUCTO','PROGRAMADA','INICIO REAL','FIN REAL','TIEMPO','INVENTARIO','ACCIONES'],items.map(o=>`<tr><td data-label="${esc(t('Orden / origen'))}"><strong>${esc(o.folio)}</strong><small class="order-source">${o.source==='portal'?'Secuencia #'+String(o.queue_number).padStart(3,'0')+' · Página de captura':o.source==='teams'?'Teams · '+productionTime(o.received_at):'Captura manual'}</small></td><td data-label="${esc(t('NP / producto'))}">${esc(o.np||[...new Set(o.lines.map(l=>l.np).filter(Boolean))].join(', ')||'—')}<small class="order-source">${esc(o.product||o.client)}</small><small class="order-source">${esc([o.pressman,o.machine,o.specifications?.colores].filter(Boolean).join(' · '))}</small></td><td data-label="${esc(t('Programada'))}">${o.scheduled_date?displayDate(o.scheduled_date):'—'}<small class="order-source">${esc(o.scheduled_start?formatWallTime(o.scheduled_start,settings):'')} ${o.scheduled_end?'→ '+esc(formatWallTime(o.scheduled_end,settings)):''}</small><small class="order-source">Entrega: ${esc(o.specifications?.production_plan?.required_date||'Pendiente')} · ${esc(effectivePriority(o.specifications?.production_plan||{},settings))}</small></td><td data-label="${esc(t('Inicio real'))}">${productionTime(o.started_at)}</td><td data-label="${esc(t('Fin real'))}">${productionTime(o.ended_at)}</td><td data-label="${esc(t('Tiempo'))}">${orderClockMarkup(o)}<small class="order-source">${preparationState(o,preparationClocks.find(clock=>clock.order_id===o.id))}</small></td><td data-label="${esc(t('Inventario'))}">${orderStatus(o)}</td><td data-label="${esc(t('Acciones'))}"><div class="actions">${o.status!=='cancelled'&&!o.ended_at?`<button class="btn ${o.started_at?'':'primary'}" data-order-clock="${o.id}" data-clock-operation="${o.started_at?'finish':'start'}">${icon(o.started_at?'check':'clock')}${o.started_at?'Finalizar':'Iniciar'}</button>`:''}<button class="btn" data-order-detail="${o.id}">Ver orden</button>${hasPreparationWorkflow&&can('preparation_correct')&&o.ended_at&&o.status!=='cancelled'?`<button class="btn" data-prepare-correction="${o.id}">Corregir tiempos</button>`:''}</div></td></tr>`).join(''))+'</div>';}
+async function changeOrderClock(id,operation,button,feedback){
+ if(feedback)feedback.textContent='';
+ const target=operation==='finish'?window.open('about:blank','_blank'):null;if(target){target.opener=null;target.document.title='Preparando orden para prensista…';}button.disabled=true;try{const result=await post('orders/clock',{id,operation,version:preparationClocks.find(clock=>clock.order_id===id)?.version,profile:{reportName:settings.reportName,reportLogo:settings.reportLogo,timeZone:effectiveTimeZone(settings),timeFormat:settings.timeFormat}});if(operation==='finish'){const sheet=result.press_sheet||await pressSheetsRequest(cloud,{operation:'generate',order_id:id});const link='/hoja-prensista.html#key='+sheet.access_key;if(target)target.location.replace(location.origin+link);toast('Preparación finalizada. Hoja guardada en Órdenes para prensistas.');if(!target){location.hash='hojas';}}else toast({pause:'Preparación en pausa.',resume:'Preparación reanudada.'}[operation]||'Orden iniciada. El tiempo continúa aunque cierres la página.');}catch(error){target?.close();toast(error.message);if(feedback)feedback.textContent=error.message;button.disabled=false;}
 }
 
 async function orderStatusLinkForm(){
@@ -348,6 +352,17 @@ async function timedIncidentForm(id=null){
  const finishButton=root.querySelector('#submit-button');finishButton.type='button';finishButton.onclick=async()=>{error.hidden=true;if(!active){fail('Selecciona primero la orden.');return;}if(!photos.before_photo){fail('Primero toma la foto del defecto.');beforeInput.click();return;}if(photos.after_photo){busy(true);try{await persist(true);}catch(e){fail(e.message);}finally{busy(false);}return;}afterInput.click();};root.onsubmit=e=>{e.preventDefault();finishButton.click();};
  const save=document.createElement('button');save.type='button';save.id='save-incident-progress';save.className='btn';save.textContent='Guardar y continuar';save.onclick=async()=>{busy(true);error.hidden=true;try{await persist(false);}catch(e){fail(e.message);}finally{busy(false);}};if(active?.ended_at)save.hidden=true;root.querySelector('.modal-actions').prepend(save);if(active&&!active.ended_at)root.querySelector('.modal-actions [data-dismiss]').textContent='Cerrar · el tiempo continúa';busy(false);if(draft&&active&&!active.ended_at)setTimeout(autosave,0);
 }
+setInterval(()=>{
+ const labels=document.querySelectorAll('[data-preparation-clock]');
+ if(!labels.length||!data)return;
+ const orders=new Map(data.orders.map(order=>[order.id,order]));
+ const clocks=new Map(preparationClocks.map(clock=>[clock.order_id,clock]));
+ for(const label of labels){
+  const id=Number(label.dataset.preparationClock);
+  const order=orders.get(id);
+  if(order)label.textContent=preparationMinutesLabel(preparationTiming(order,clocks.get(id)).effective);
+ }
+},1000);
 setInterval(()=>document.querySelectorAll('[data-incident-start]').forEach(el=>{const value=incidentClock(incidentSeconds({started_at:el.dataset.incidentStart,ended_at:el.dataset.incidentEnd}));if(el.textContent!==value)el.textContent=value;}),1000);
 function manualIncidentForm(id=null){
  const existing=(data.incidents||[]).find(i=>i.id===id),orders=data.orders||[];
@@ -473,6 +488,10 @@ function dieUsageRows(){const result=(view==='plecas'?creaseUsage:dieUsage)(data
 function dieUsageView(){const pleca=view==='plecas',label=pleca?'pleca':'suaje',upper=pleca?'PLECA':'SUAJE',prefix=pleca?'PD':'SJ';const {groups,pending}=dieUsageRows();return header('USO DE HERRAMENTALES','Metros corridos por '+label,'Se registra al confirmar el consumo y cerrar la orden. Cada orden cuenta una sola vez.',button('Exportar PDF','export','download'))+`<section class="stats">${stat('Metros del mes',num(decimalSum(groups.map(g=>g.monthMeters))),'m',monthLabel(month),'tool')}${stat(pleca?'Plecas registradas':'Suajes registrados',num(groups.length),'','Con historial de órdenes cerradas','tool')}${stat('Órdenes del mes',num(groups.reduce((n,g)=>n+g.runs.length,0)),'','Sin duplicar por tinta','file')}${stat('Pendientes de revisar',num(pending.length),'','Sin '+label+' o metros consistentes','warning')}</section><section class="panel"><div class="panel-heading"><div><h2>Acumulado por ${label}</h2><p>El acumulado histórico incluye todas las órdenes cerradas disponibles.</p></div>${monthInput()}</div><div class="toolbar">${search('Buscar código '+prefix+' u orden…')}</div>${table([upper,'METROS DEL MES','METROS ACUMULADOS','ÓRDENES DEL MES'],groups.map(g=>`<tr><td><strong>${esc(g.code)}</strong></td><td>${num(g.monthMeters)} m</td><td>${num(g.meters)} m</td><td>${g.runs.length}</td></tr>`).join(''))}</section><section class="panel" style="margin-top:20px"><div class="panel-heading"><h2>Registro de órdenes cerradas · ${monthLabel(month)}</h2></div>${table([upper,'ORDEN / NP','FECHA DEL REGISTRO','MÁQUINA','PRODUCTO','METROS CORRIDOS'],groups.flatMap(g=>g.runs.map(r=>`<tr><td>${esc(g.code)}</td><td>${esc(r.order.folio)} / ${esc(r.order.np||'—')}</td><td>${displayDate(r.order.date)}</td><td>${esc(r.order.machine||'—')}</td><td>${esc(r.order.product||'—')}</td><td>${num(r.meters)} m</td></tr>`)).join(''))}</section>${pending.length?`<section class="panel" style="margin-top:20px"><div class="panel-heading"><h2>Órdenes sin acumulación de metros</h2></div>${table(['ORDEN','MOTIVO'],pending.map(r=>`<tr><td>${esc(r.order.folio)}</td><td>${esc(r.reason)}</td></tr>`).join(''))}</section>`:''}`;}
 function cuts(){const saved=data.cuts.find(c=>c.month===month),rows=(saved?saved.snapshot:monthlyRows()).filter(l=>l.category==='tinta'),inks=rows.filter(l=>l.category==='tinta'),closed=!!saved,noHistory=month<data.baseline.slice(0,7);const filtered=rows.filter(l=>`${l.name} ${l.code} ${l.lot}`.toLowerCase().includes(query.toLowerCase()));return header('CIERRE Y CONTROL MENSUAL','Cada mes, cuentas claras.','Corte de tintas: saldos, ingresos y egresos del mes en gramos.',button('Exportar corte PDF','export','download')+button(closed?'Mes cerrado':'Cerrar mes','close-month','calendar',true,closed?'disabled':''))+`<section class="stats">${stat('Existencia inicial',num(decimalSum(inks.map(l=>l.opening))),'g','Saldo inicial registrado','box')}${stat('Ingresos del mes',num(decimalSum(inks.map(l=>l.incoming))),'g','Entradas y devoluciones','arrows')}${stat('Egresos del mes',num(decimalSum(inks.map(l=>l.outgoing))),'g','Salidas y producción','arrows')}${stat('Existencia final',num(decimalSum(inks.map(l=>l.closing))),'g','Inicial + ingresos − egresos','check')}</section><section class="panel"><div class="panel-heading"><div><h2>${closed?'Corte definitivo':'Resumen del mes'}</h2><p>${monthLabel(month)}</p></div>${monthInput()}</div><div class="cut-info">${noHistory?'No hay historia anterior a la carga inicial del '+displayDate(data.baseline)+'.':closed?`<strong>Mes cerrado.</strong> Este corte conserva los saldos al cierre y bloquea movimientos en el período.`:`<strong>Resumen en curso.</strong> El corte definitivo está disponible al terminar el mes. La carga inicial se considera saldo de apertura; no reconstruye movimientos anteriores al ${displayDate(data.baseline)}.`}</div><div class="toolbar">${search()}<span class="spacer"></span><span class="status ${closed?'':'neutral'}">${closed?'Cerrado':'Sin cierre definitivo'}</span></div>${noHistory?empty('No hay movimientos históricos','El piloto inicia con las existencias del PDF.'):table(['TINTA','LOTE','INICIAL','INGRESOS','EGRESOS','FINAL','VALOR FINAL'],slice(filtered).map(l=>`<tr><td>${ink(l)}</td><td>${esc(l.lot)}</td><td>${num(l.opening)}</td><td>${num(l.incoming)}</td><td>${num(l.outgoing)}</td><td class="stock ${l.closing<0?'negative':''}">${num(l.closing)} <span class="unit">${l.category==='tinta'?'g':'pzas'}</span></td><td>${money(l.closing*l.cost_kg/(l.category==='tinta'?1000:1))}</td></tr>`).join(''))}${noHistory?'':pager(filtered.length)}</section>`}
 function bind(){
+ main.querySelectorAll('[data-prepare-correction]').forEach(button=>button.onclick=()=>{
+  const order=data.orders.find(item=>item.id===Number(button.dataset.prepareCorrection));
+  if(order)preparationCorrection(order);
+ });
  if(view==='preparacion'){
   if(preparationTab==='indicators'&&hasPreparationWorkflow&&preparationEvents?.month!==month){
    const request={month,orders:[],pending:true};
@@ -732,30 +751,50 @@ async function preparationCorrection(order){
  const clock=preparationClocks.find(item=>item.order_id===order.id);
  const timing=preparationTiming(order,clock);
  const current=clock?.correction||order;
- const iso=value=>new Date(value).toISOString();
+ const zone=effectiveTimeZone(settings);
+ const minutes=value=>Number((value/60).toFixed(2));
  const reasons=['Olvido de finalizar el cronómetro','Interrupción de la preparación','Cambio de prioridad','Falta de materiales','Falla del sistema','Error de captura','Apoyo a otra área','Otros motivos'];
  try{
   const {history}=await cloud.preparationWorkflow({operation:'history',id:order.id});
   const corrections=history.filter(event=>event.operation==='correct');
   const columns=['FECHA','USUARIO','MOTIVO','ANTES','DESPUÉS'];
   const describe=value=>`${formatTimestamp(value.started_at,settings)} → ${formatTimestamp(value.ended_at,settings)} · ${num(value.effective_seconds/60)} min efectivos · ${num(value.paused_seconds/60)} min de pausa · ${num(value.idle_seconds/60)} min improductivos`;
-  show('Corregir tiempos',esc(order.folio),`<p class="form-hint">Conserva la zona horaria indicada en las fechas ISO. La suma de los segundos efectivos, en pausa e improductivos debe coincidir con el tiempo total.</p>
-   <div class="form-grid">${field('Inicio (ISO 8601)','started_at','text',iso(current.started_at),'required')}${field('Fin (ISO 8601)','ended_at','text',iso(current.ended_at),'required')}
-   ${field('Segundos efectivos','effective_seconds','number',timing.effective.toFixed(3),'required min="0" step="any"')}${field('Segundos de pausa','paused_seconds','number',timing.paused.toFixed(3),'required min="0" step="any"')}
-   ${field('Segundos improductivos','idle_seconds','number',timing.idle.toFixed(3),'required min="0" step="any"')}
-   ${selectField('Motivo','category',reasons.map(reason=>`<option>${esc(reason)}</option>`).join(''))}
-   ${field('Detalle','description','text','','maxlength="900"')}</div>
-   ${corrections.length?table(columns,corrections.map(event=>'<tr>'+[formatTimestamp(event.recorded_at,settings),event.actor,event.reason,describe(event.before_value),describe(event.after_value)].map(value=>`<td>${esc(value)}</td>`).join('')+'</tr>').join('')):''}`,
+  show('Corregir tiempos',esc(order.folio),`<p class="form-hint">Indica la duración en minutos o elige la hora de fin. Horario del perfil: ${esc(zone)}.</p>
+   ${selectField('Cómo quieres corregir','mode','<option value="duration">Cambiar minutos efectivos</option><option value="end">Cambiar fecha y hora de fin</option>')}
+   <div class="form-grid">
+   ${field('Fecha y hora de inicio','started_at','datetime-local',preparationWallTime(current.started_at,zone),'required')}
+   ${field('Fecha y hora de fin','ended_at','datetime-local',preparationWallTime(current.ended_at,zone),'required disabled')}
+   ${field('Minutos efectivos','effective_minutes','number',minutes(timing.effective),'required min="0" step="any" inputmode="decimal"')}
+   ${field('Minutos de pausa','paused_minutes','number',minutes(timing.paused),'required min="0" step="any" inputmode="decimal"')}
+   ${field('Minutos improductivos','idle_minutes','number',minutes(timing.idle),'required min="0" step="any" inputmode="decimal"')}
+   ${selectField('Motivo','category','<option value="">Selecciona un motivo</option>'+reasons.map(reason=>`<option>${esc(reason)}</option>`).join(''),'required')}
+   ${field('Detalle opcional','description','text','','maxlength="900"')}</div>
+   <p class="notice" id="correction-preview" aria-live="polite"></p>
+   ${corrections.length?`<details><summary>Historial de correcciones</summary>${table(columns,corrections.map(event=>'<tr>'+[formatTimestamp(event.recorded_at,settings),event.actor,event.reason,describe(event.before_value),describe(event.after_value)].map(value=>`<td>${esc(value)}</td>`).join('')+'</tr>').join(''))}</details>`:''}`,
    'Guardar corrección',async form=>{
     const values=Object.fromEntries(form);
-    const total=(Date.parse(values.ended_at)-Date.parse(values.started_at))/1000;
-    const allocated=Number(values.effective_seconds)+Number(values.paused_seconds)+Number(values.idle_seconds);
-    if(!Number.isFinite(total)||total<=0||Math.abs(total-allocated)>=1)throw Error('Revisa las fechas y suma de tiempos.');
     await cloud.preparationWorkflow({operation:'correct',id:order.id,version:clock?.version??0,
-     ...values,reason:[values.category,values.description.trim()].filter(Boolean).join(' · ')});
+     ...preparationCorrectionValues(values,current,zone),reason:[values.category,values.description.trim()].filter(Boolean).join(' · ')});
     await load();
     toast('Corrección guardada con su historial.');
    });
+  const form=modal.querySelector('form');
+  const update=()=>{
+   const byEnd=form.elements.mode.value==='end';
+   form.elements.ended_at.disabled=!byEnd;
+   form.elements.ended_at.closest('label').hidden=!byEnd;
+   form.elements.effective_minutes.disabled=byEnd;
+   form.elements.effective_minutes.closest('label').hidden=byEnd;
+   const preview=form.querySelector('#correction-preview');
+   try{
+    const result=preparationCorrectionValues(Object.fromEntries(new FormData(form)),current,zone);
+    const total=result.effective_seconds+result.paused_seconds+result.idle_seconds;
+    preview.textContent=`${preparationMinutesLabel(total)} totales · ${preparationMinutesLabel(result.effective_seconds)} efectivos · Fin: ${formatTimestamp(result.ended_at,settings,{dateStyle:'short',timeStyle:'short'})}`;
+   }catch(error){preview.textContent=error.message;}
+  };
+  form.addEventListener('input',update);
+  form.addEventListener('change',update);
+  update();
  }catch(error){toast(error.message);}
 }
 
@@ -800,7 +839,7 @@ function exportPDF(){
    rows=preparations.map(p=>[displayDate(p.date),p.folio,p.np,formatWallTime(p.start_time,settings),formatWallTime(p.end_time,settings)+(p.end_next_day?' (+1 día)':''),num(p.minutes),p.requested_date?displayDate(p.requested_date):'-',formatWallTime(p.requested_time,settings),p.supplies,p.product,p.notes||'-']);
    summary=preparations.length+' preparaciones · Tiempo total: '+num(preparations.reduce((s,p)=>s+Number(p.minutes),0))+' min';
    notes.push('Tiempo de preparación = fin - inicio; se indica si terminó al día siguiente. No modifica las existencias.');
-   sections.push({title:(preparationTab==='prepared'?'Órdenes preparadas · horarios reales':'Seguimiento de preparación · horarios reales')+' ('+effectiveTimeZone(settings)+')',columns:[col('Orden / NP',130),col('Producto / máquina',160),col('Inicio real',140),col('Fin real',140),col('Tiempo (min)',88),col('Estado',120)],rows:trackedOrders().filter(o=>o.status!=='cancelled'&&(preparationTab==='prepared'?!!o.ended_at:preparationTab==='queue'?!o.ended_at:true)).map(o=>[o.folio+' / '+(o.np||'—'),(o.product||o.client)+' / '+(o.machine||'—'),productionTime(o.started_at),productionTime(o.ended_at),num(incidentSeconds(o)/60),o.ended_at?'Preparada':o.started_at?'En preparación':'En espera'])});
+   sections.push({title:(preparationTab==='prepared'?'Órdenes preparadas · horarios reales':'Seguimiento de preparación · horarios reales')+' ('+effectiveTimeZone(settings)+')',columns:[col('Orden / NP',130),col('Producto / máquina',160),col('Inicio real',140),col('Fin real',140),col('Tiempo (min)',88),col('Estado',120)],rows:trackedOrders().filter(o=>o.status!=='cancelled'&&(preparationTab==='prepared'?!!o.ended_at:preparationTab==='queue'?!o.ended_at:true)).map(o=>[o.folio+' / '+(o.np||'—'),(o.product||o.client)+' / '+(o.machine||'—'),productionTime(o.started_at),productionTime(o.ended_at),num(preparationTiming(o,preparationClocks.find(clock=>clock.order_id===o.id)).effective/60),preparationState(o,preparationClocks.find(clock=>clock.order_id===o.id))])});
   }else if(view==='ordenes'){
    title='Órdenes de producción · '+monthLabel(month);const groups=closedProductionGroups();
    columns=[col('Orden',110),col('NP / producto',245),col('Tintas',50),col('Consumo confirmado (g)',115),col('Metros reales',100),col('Estado',158)];
