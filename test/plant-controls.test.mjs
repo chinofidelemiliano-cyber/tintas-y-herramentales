@@ -19,3 +19,17 @@ test('suggests ABC by accumulated demand and lets indispensable inks stay in A',
  assert.equal(b.alert,true);
  assert.equal(critical.alert,false);
 });
+
+test('draft groups purchases by supplier and leaves the quantity in kilograms',async()=>{
+ const {supplyEmail}=await import('../public/plant-controls.js');
+ const draft=supplyEmail([
+  {code:'A1',name:'Amarillo',provider:'Proveedor 1',kg:4},
+  {code:'B1',name:'Negro',provider:'Proveedor 1',kg:8.5},
+  {code:'C1',name:'Azul',kg:2}
+ ]);
+ assert.match(draft.body,/Buen día, Maribel/);
+ assert.match(draft.body,/Amarillo \(A1\): 4 kg/);
+ assert.match(draft.body,/Negro \(B1\): 8.5 kg/);
+ assert.equal(draft.body.match(/Proveedor 1/g).length,1);
+ assert.match(draft.body,/Azul \(C1\): 2 kg/);
+});

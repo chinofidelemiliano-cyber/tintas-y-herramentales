@@ -1,4 +1,4 @@
-import {mountPlantControls} from './plant-controls.js';
+import {mountPlantControls,mountQuickCapture,mountProductionSemester} from './plant-controls.js';
 import {mountInkPicker} from './ink-picker.js';
 import {productionTypes} from './production-type.js';
 import {createPreparationIndicator, preparationTiming, preparationState, preparationMinutesLabel, preparationWallTime, preparationCorrectionValues} from './preparation-workflow.js';
@@ -14,7 +14,7 @@ import {orderCommentsPanel,bindOrderComments} from './order-comments.js';
 import {inkOptionsProfile,bindInkOptionsProfile} from './ink-options-profile.js';
 import {dieUsage,creaseUsage} from './die-usage.js';
 import {renderAuthScreen,renderPendingAccount} from './auth-screen.js';
-import {allowedView} from './account-permissions.js';
+import {allowedView,hasOwnerQuickCapture} from './account-permissions.js';
 import {administrationView,bindAdministration} from './administration.js';
 import {devicesView,bindDevices} from './devices-view.js';
 import {stopDeviceOnLogout,syncDeviceAccount} from './device-notifications.js';
@@ -89,7 +89,7 @@ async function load(){
    if(accountAccess.session_closed){try{await stopDeviceOnLogout(cloud);}catch{}await cloud.signOut();renderLogin('Esta sesión fue cerrada. Inicia sesión nuevamente.');return;}
    if(notificationUser!==cloud.userId()){try{await syncDeviceAccount(cloud);notificationUser=cloud.userId();}catch{}}
    if(!accountAccess.approved||(!accountAccess.is_admin&&!accountAccess.permissions.length)){renderWaitingAccount();return;}
-   data=await cloud.state();if(notificationUser!==cloud.userId()){try{await syncDeviceAccount(cloud);notificationUser=cloud.userId();}catch{}}if(!profileLoaded){try{settings=await loadProfilePreferences(cloud);profileLoaded=true;profileError='';}catch(error){settings=readPreferences(cloud.userId());profileError=error.message;toast(error.message);}}setTimeSettings(settings);if(data.today!==todayInZone(settings))data=await cloud.state();readOnly=false;await loadPreparationClocks();month ||= data.today.slice(0,7);document.querySelector('#today-label').textContent=displayDate(data.today);document.querySelector('.live').innerHTML='<i></i> Base de datos conectada';render();installLogout();return;}
+   data=await cloud.state();if(notificationUser!==cloud.userId()){try{await syncDeviceAccount(cloud);notificationUser=cloud.userId();}catch{}}if(!profileLoaded){try{settings=await loadProfilePreferences(cloud);profileLoaded=true;profileError='';}catch(error){settings=readPreferences(cloud.userId());profileError=error.message;toast(error.message);}}setTimeSettings(settings);if(data.today!==todayInZone(settings))data=await cloud.state();readOnly=false;await loadPreparationClocks();if(location.hash==='#captura-rapida'&&hasOwnerQuickCapture(accountAccess))view='captura-rapida';month ||= data.today.slice(0,7);document.querySelector('#today-label').textContent=displayDate(data.today);document.querySelector('.live').innerHTML='<i></i> Base de datos conectada';render();installLogout();return;}
    catch(error){renderLogin(error.message);return;}
   }
   const r=await fetch('/api/state',{headers:{'X-Client-Info':'inventory-web; time-zone='+effectiveTimeZone(settings)}});
@@ -135,7 +135,7 @@ function renderWaitingAccount(){preparationEvents=null;preparationIndicator.clea
  installLogout();renderPendingAccount({main,access:accountAccess,getSettings:()=>settings,onAppearance:setAuthAppearance,onRefresh:load,onSignOut:()=>document.querySelector('#logout').click(),onVerify:()=>renderAuthScreen({main,cloud,getSettings:()=>settings,onAppearance:setAuthAppearance,onReady:load,phase:'verify',email:accountAccess.email})});
 }
 
-const navs=[['inventario','box','Inventario'],['movimientos','arrows','Ingresos y egresos'],['catalogo','grid','Catálogo'],['stock','box','Clasificación de tintas'],['herramental','tool','Suajes y reafiles'],['anilox','tool','Anilox'],['recetas','file','Recetas por NP'],['ordenes','file','Órdenes de producción'],['hojas','file','Órdenes para prensistas'],['historial','file','Historial por responsable'],['bitacora','clock','Bitácora privada de producción'],['preparacion','clock','Tiempos de preparación'],['incidencias','warning','Incidencias'],['cortes','calendar','Cortes mensuales'],['suajes','tool','Metros por suaje'],['plecas','tool','Metros por pleca'],['dispositivos','grid','Administrar dispositivos'],['configuracion','tool','Configuración'],['administracion','tool','Cuentas y seguridad']];
+const navs=[['inventario','box','Inventario'],['movimientos','arrows','Ingresos y egresos'],['catalogo','grid','Catálogo'],['stock','box','Clasificación de tintas'],['herramental','tool','Suajes y reafiles'],['anilox','tool','Anilox'],['recetas','file','Recetas por NP'],['ordenes','file','Órdenes de producción'],['hojas','file','Órdenes para prensistas'],['historial','file','Historial por responsable'],['bitacora','clock','Bitácora privada de producción'],['preparacion','clock','Tiempos de preparación'],['captura-rapida','plus','Captura rápida privada'],['corte-semestral','calendar','Corte semestral de producción'],['incidencias','warning','Incidencias'],['cortes','calendar','Cortes mensuales'],['suajes','tool','Metros por suaje'],['plecas','tool','Metros por pleca'],['dispositivos','grid','Administrar dispositivos'],['configuracion','tool','Configuración'],['administracion','tool','Cuentas y seguridad']];
 function visibleNavs(){return navs.filter(n=>(cloud||!plantViews.includes(n[0]))&&allowedView(n[0],cloud?accountAccess:null));}
 function go(v){const available=visibleNavs();view=available.some(n=>n[0]===v)?v:(available[0]?.[0]||'inventario');query='';typeFilter='';providerFilter='';statusFilter='';page=1;closeMobileMenu();render();window.scrollTo({top:0,left:0,behavior:'auto'});}
 window.addEventListener('hashchange',()=>go(location.hash.slice(1)));
@@ -156,15 +156,15 @@ function table(headers,rows){return `<div class="table-wrap"><table><thead><tr>$
 function pager(total,label='lotes'){const pages=Math.max(1,Math.ceil(total/perPage));page=Math.min(page,pages);let visible=Array.from({length:pages},(_,i)=>i+1).filter(n=>n===1||n===pages||Math.abs(n-page)<=1);return `<div class="table-footer"><span>Mostrando <b>${total?((page-1)*perPage+1):0}–${Math.min(total,page*perPage)}</b> de <b>${total}</b> ${label}</span><div class="pagination"><button class="page-btn" data-page="${page-1}" ${page===1?'disabled':''} aria-label="Página anterior">‹</button>${visible.map((n,i)=>`${i&&n-visible[i-1]>1?'<span>…</span>':''}<button class="page-btn ${n===page?'selected':''}" data-page="${n}">${n}</button>`).join('')}<button class="page-btn" data-page="${page+1}" ${page===pages?'disabled':''} aria-label="Página siguiente">›</button></div></div>`}
 function slice(rows){page=Math.min(page,Math.max(1,Math.ceil(rows.length/perPage)));return rows.slice((page-1)*perPage,page*perPage)}
 function monthInput(){return `<div class="month-control">${icon('calendar').replace('<svg ','<svg width="16" height="16" ')}<input type="month" id="month" aria-label="Mes" value="${month}"></div>`}
-const plantViews=['stock','herramental','anilox','recetas'];
+const plantViews=['stock','herramental','anilox','recetas','captura-rapida','corte-semestral'];
 const plantView=()=>'<section id="plant-controls" class="panel"></section>';
 function bindPlant(view,order=null){
  mountPlantControls(order?modal:main.querySelector('#plant-controls'),{
-  request:payload=>cloud.plantControls(payload),show,toast,view,
-  mayEdit:can(view==='stock'?'catalog':'preparation_edit'),inkLots:data.lots,order
+  request:payload=>payload.operation==='forecast_parts'?cloud.forecastParts():cloud.plantControls(payload),aniloxCleaning:payload=>cloud.aniloxCleaning(payload),recordResharpen:payload=>cloud.recordResharpen(payload),show,toast,view,
+  mayEdit:can(view==='stock'?'catalog':'preparation_edit'),inkLots:data.lots,products:data.products,creases:creaseUsage(data.orders,data.products).groups,order
  });
 }
-function render(){if(!data)return;if(!allowedView(view,cloud?accountAccess:null))view=visibleNavs()[0]?.[0]||'inventario';document.querySelector('#navigation').innerHTML=visibleNavs().map(([id,ic,label])=>`<a class="nav-item ${view===id?'active':''}" href="#${id}">${icon(ic)}${label}${id==='inventario'?`<span class="nav-badge">${data.lots.length}</span>`:''}</a>`).join('');document.querySelector('#breadcrumb').textContent=navs.find(n=>n[0]===view)[2];main.innerHTML=(readOnly?'<div class="notice"><strong>Vista previa del piloto.</strong> Puedes explorar las pantallas y exportar el inventario del PDF. Guardar movimientos, productos y órdenes requiere conectar la base de datos; aquí no se guardan cambios.</div>':'')+({stock:plantView,herramental:plantView,anilox:plantView,recetas:plantView,inventario:inventory,movimientos:movements,catalogo:catalog,ordenes:orders,hojas:pressSheetsView,bitacora:productionAuditView,historial:workHistoryView,preparacion:preparations,incidencias:incidents,cortes:cuts,suajes:dieUsageView,plecas:dieUsageView,configuracion:settingsView,dispositivos:devicesView,administracion:administrationView}[view])();bind();applyPreferences()}
+function render(){if(!data)return;if(!allowedView(view,cloud?accountAccess:null))view=visibleNavs()[0]?.[0]||'inventario';document.querySelector('#navigation').innerHTML=visibleNavs().map(([id,ic,label])=>`<a class="nav-item ${view===id?'active':''}" href="#${id}">${icon(ic)}${label}${id==='inventario'?`<span class="nav-badge">${data.lots.length}</span>`:''}</a>`).join('');document.querySelector('#breadcrumb').textContent=navs.find(n=>n[0]===view)[2];main.innerHTML=(readOnly?'<div class="notice"><strong>Vista previa del piloto.</strong> Puedes explorar las pantallas y exportar el inventario del PDF. Guardar movimientos, productos y órdenes requiere conectar la base de datos; aquí no se guardan cambios.</div>':'')+({'captura-rapida':plantView,'corte-semestral':plantView,stock:plantView,herramental:plantView,anilox:plantView,recetas:plantView,inventario:inventory,movimientos:movements,catalogo:catalog,ordenes:orders,hojas:pressSheetsView,bitacora:productionAuditView,historial:workHistoryView,preparacion:preparations,incidencias:incidents,cortes:cuts,suajes:dieUsageView,plecas:dieUsageView,configuracion:settingsView,dispositivos:devicesView,administracion:administrationView}[view])();bind();applyPreferences()}
 function pdfStyleControls(opts){
  const p=settings.pdfStyle;
  const bool=(key,label)=>`<label class="field full"><span><input class="inline-checkbox" name="pdf_${key}" type="checkbox" ${p[key]?'checked':''}> ${label}</span></label>`;
@@ -520,7 +520,18 @@ async function correctClosedTool(order,kind){
 }
 function cuts(){const saved=data.cuts.find(c=>c.month===month),rows=(saved?saved.snapshot:monthlyRows()).filter(l=>l.category==='tinta'),inks=rows.filter(l=>l.category==='tinta'),closed=!!saved,noHistory=month<data.baseline.slice(0,7);const filtered=rows.filter(l=>`${l.name} ${l.code} ${l.lot}`.toLowerCase().includes(query.toLowerCase()));return header('CIERRE Y CONTROL MENSUAL','Cada mes, cuentas claras.','Corte de tintas: saldos, ingresos y egresos del mes en gramos.',button('Exportar corte PDF','export','download')+button(closed?'Mes cerrado':'Cerrar mes','close-month','calendar',true,closed?'disabled':''))+`<section class="stats">${stat('Existencia inicial',num(decimalSum(inks.map(l=>l.opening))),'g','Saldo inicial registrado','box')}${stat('Ingresos del mes',num(decimalSum(inks.map(l=>l.incoming))),'g','Entradas y devoluciones','arrows')}${stat('Egresos del mes',num(decimalSum(inks.map(l=>l.outgoing))),'g','Salidas y producción','arrows')}${stat('Existencia final',num(decimalSum(inks.map(l=>l.closing))),'g','Inicial + ingresos − egresos','check')}</section><section class="panel"><div class="panel-heading"><div><h2>${closed?'Corte definitivo':'Resumen del mes'}</h2><p>${monthLabel(month)}</p></div>${monthInput()}</div><div class="cut-info">${noHistory?'No hay historia anterior a la carga inicial del '+displayDate(data.baseline)+'.':closed?`<strong>Mes cerrado.</strong> Este corte conserva los saldos al cierre y bloquea movimientos en el período.`:`<strong>Resumen en curso.</strong> El corte definitivo está disponible al terminar el mes. La carga inicial se considera saldo de apertura; no reconstruye movimientos anteriores al ${displayDate(data.baseline)}.`}</div><div class="toolbar">${search()}<span class="spacer"></span><span class="status ${closed?'':'neutral'}">${closed?'Cerrado':'Sin cierre definitivo'}</span></div>${noHistory?empty('No hay movimientos históricos','El piloto inicia con las existencias del PDF.'):table(['TINTA','LOTE','INICIAL','INGRESOS','EGRESOS','FINAL','VALOR FINAL'],slice(filtered).map(l=>`<tr><td>${ink(l)}</td><td>${esc(l.lot)}</td><td>${num(l.opening)}</td><td>${num(l.incoming)}</td><td>${num(l.outgoing)}</td><td class="stock ${l.closing<0?'negative':''}">${num(l.closing)} <span class="unit">${l.category==='tinta'?'g':'pzas'}</span></td><td>${money(l.closing*l.cost_kg/(l.category==='tinta'?1000:1))}</td></tr>`).join(''))}${noHistory?'':pager(filtered.length)}</section>`}
 function bind(){
- if(plantViews.includes(view)&&cloud)bindPlant(view);
+ if(cloud&&view==='captura-rapida')mountQuickCapture(main.querySelector('#plant-controls'),{
+  request:payload=>cloud.ownerQuickCapture(payload),toast,onSaved:async saved=>{
+   month=saved.today.slice(0,7);
+   preparationTab='queue';
+   await load();
+   if(location.hash!=='#preparacion')location.hash='preparacion';
+  }
+ });
+ else if(cloud&&view==='corte-semestral')mountProductionSemester(main.querySelector('#plant-controls'),{
+  request:payload=>cloud.productionSemester(payload),show,toast,today:data.today,admin:accountAccess.is_admin
+ });
+ else if(plantViews.includes(view)&&cloud)bindPlant(view);
  main.querySelectorAll('[data-plant-recipe]').forEach(button=>button.onclick=()=>{
   const order=data.orders.find(item=>item.id===Number(button.dataset.plantRecipe));
   if(order)bindPlant('recetas',order);
