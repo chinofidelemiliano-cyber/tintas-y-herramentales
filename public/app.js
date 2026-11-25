@@ -160,7 +160,7 @@ const plantViews=['stock','herramental','anilox','recetas','captura-rapida','cor
 const plantView=()=>'<section id="plant-controls" class="panel"></section>';
 function bindPlant(view,order=null){
  mountPlantControls(order?modal:main.querySelector('#plant-controls'),{
-  request:payload=>payload.operation==='forecast_parts'?cloud.forecastParts():cloud.plantControls(payload),aniloxCleaning:payload=>cloud.aniloxCleaning(payload),recordResharpen:payload=>cloud.recordResharpen(payload),show,toast,view,
+  request:payload=>payload.operation==='recipe'?cloud.recipeReference(payload):payload.operation==='forecast_parts'?cloud.forecastParts():cloud.plantControls(payload),aniloxCleaning:payload=>cloud.aniloxCleaning(payload),recordResharpen:payload=>cloud.recordResharpen(payload),show,toast,view,
   mayEdit:can(view==='stock'?'catalog':'preparation_edit'),inkLots:data.lots,products:data.products,creases:creaseUsage(data.orders,data.products).groups,order
  });
 }

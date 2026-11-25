@@ -310,22 +310,29 @@ export function mountPlantControls(root,{request,aniloxCleaning,recordResharpen,
   root.onclick=event=>{if(event.target.closest('[data-plant-action=recipe]'))form.requestSubmit();};
  }
  async function recipe(args){
-  const {code,product,recipe:saved,anilox,order:source}=await api('recipe',args);
+  const {code,product,recipe:saved,anilox,order:source,reference}=await api('recipe',args);
   if(!code)throw Error('La orden no tiene NP.');
-  const seeds=source?.inks||[];
+  const seeds=reference?.inks||source?.inks||[];
   const plan=source?.specifications?.production_plan;
   const withoutInk=plan?.production_type==='cut'||plan?.white_process==='material';
   const stations=Array.from({length:Math.max(6,...(saved?.stations||[]).map(i=>i.slot),...seeds.map(i=>i.slot))},(_,i)=>{
    const previous=saved?.stations?.find(station=>station.slot===i+1)||{};
    const observed=seeds.find(station=>station.slot===i+1);
-   if(!source||(!seeds.length&&!withoutInk))return {slot:i+1,...previous};
-   const family=observed?.ink_family||'',color=observed?.name||observed?.pantone||'';
-   return {slot:i+1,...(previous.color===color&&previous.family===family?previous:{}),family,color};
+   if(!observed&&!withoutInk)return {slot:i+1,...previous};
+   const family=observed?.ink_family||observed?.kind||'',color=observed?.name||observed?.pantone||'';
+   if(!source)return {slot:i+1,...previous,family:previous.family||family,color:previous.color||color,plate:previous.plate||reference?.plates||''};
+   return {slot:i+1,...(previous.color===color&&previous.family===family?previous:{}),family,color,plate:previous.plate||reference?.plates||''};
   });
-  const top={...saved,product:source?.product||product||saved?.product||'',machine:source?.machine||saved?.machine||'',pressman:source?.pressman||saved?.pressman||'',
-   die:source?.specifications?.suaje||saved?.die||'',crease:source?.specifications?.pleca||saved?.crease||'',material:source?.specifications?.production_plan?.material_code||saved?.material||''};
+  const top={...Object.fromEntries(Object.entries(reference||{}).filter(([key,value])=>typeof value==='string'&&key!=='folio')),
+   ...Object.fromEntries(Object.entries(saved||{}).filter(([,value])=>value!==''&&value!=null))};
+  top.product ||= source?.product||product||'';
+  top.machine ||= source?.machine||'';
+  top.pressman ||= source?.pressman||'';
+  top.die ||= source?.specifications?.suaje||'';
+  top.crease ||= source?.specifications?.pleca||'';
+  if(!top.notes&&reference?.colors_text)top.notes='Colores registrados sin posición: '+reference.colors_text;
   const topFields={product:'Producto',machine:'Prensa',pressman:'Prensista',die:'Suaje',crease:'Pleca',measure:'Medida',material:'Material',priority:'Prioridad',version:'Versión',...recipeFields};
-  show('Receta de producción',esc(code+(source?.folio?' · '+source.folio:'')),`<div class="form-grid">${Object.entries(topFields).map(([name,label])=>field(label,name,top[name]||'','text','maxlength="250"')).join('')}</div>
+  show('Receta de producción',esc(code+(source?.folio?' · '+source.folio:'')),`<div class="form-grid">${reference?.folio?`<p class="form-hint full">Datos disponibles de la orden ${esc(reference.folio)}.</p>`:''}${Object.entries(topFields).map(([name,label])=>field(label,name,top[name]||'','text','maxlength="250"')).join('')}</div>
    <h3>Estaciones</h3>${stations.map(station=>`<fieldset><legend>Estación ${station.slot}</legend><div class="form-grid">${Object.entries(stationFields).map(([name,label])=>
      name==='anilox'?select(label,'station_'+station.slot+'_'+name,[['','Sin asignar'],...anilox.map(ax=>[ax.code,`${ax.code} · ${ax.lpi} LPI · ${ax.bcm} BCM`])],station[name]):
      field(label,'station_'+station.slot+'_'+name,station[name]||'','text','maxlength="100"')).join('')}</div></fieldset>`).join('')}

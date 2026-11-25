@@ -304,5 +304,27 @@ await assert.rejects(rpc('anilox_cleaning',{operation:'save',code:'AX1',cleaned_
 await db.exec('reset role');
 await db.query('select public.prisma_queue_plant_alerts()');
 assert.ok((await db.query("select count(*)::int as total from public.prisma_notification_jobs where plant_notice->>'url'='/#anilox'")).rows[0].total>0);
+const pantonesMigration=readFileSync(new URL('../supabase/plant-recipe-pantones.sql',import.meta.url),'utf8');
+await db.exec(pantonesMigration);
+await db.exec(pantonesMigration);
+const mix=(await db.query("insert into public.prisma_products(code,name,kind,provider) values('MIX-PANTONE-900','Pantone P263 (Base Agua)','Mezcla','Interno') returning id")).rows[0].id;
+await user(a);
+const recipeRef=await rpc('recipe_reference',{code:'NP001-1'});
+assert.ok(recipeRef.reference.product);
+assert.equal(recipeRef.recipe.stations[0].anilox,'AX1');
+assert.ok(!(await plant('ink_list')).inks.some(ink=>ink.code.startsWith('MIX-PANTONE-')));
+await db.exec('reset role;set role anon');
+const mixOption=(await portal({operation:'catalog'})).products.find(p=>p.id===mix);
+assert.equal(mixOption.pantone_label,'P263');
+assert.equal(mixOption.pantone_family,'Base Agua');
+const mixedCapt={...shared,folio:'TYPE-MIX-907',np:'NP001-1',product:'Prueba de mezcla',production_type:'print',die_id:null,plates:'PLC-M',ink_selections:[{slot:1,product_id:mix,ink_family:'Base Agua'}]};
+const mixed=await portal({operation:'submit',request_key:'00000000-0000-4000-8000-000000000006',order:mixedCapt});
+await assert.rejects(portal({operation:'submit',request_key:'00000000-0000-4000-8000-000000000007',order:{
+ ...mixedCapt,folio:'TYPE-MIX-WRONG',ink_selections:[{slot:1,product_id:mix,ink_family:'UV'}]
+}}),/tipo seleccionado/);
+await db.exec('reset role');
+const storedMix=(await db.query('select specifications,ink_selections from public.prisma_orders where id=$1',[mixed.id])).rows[0];
+assert.equal(storedMix.specifications.colores,'P263 (Base Agua)');
+assert.equal(storedMix.ink_selections[0].product_id,mix);
 console.log('Validado: preparación, clasificación, reservas, maestros de planta, reafile, avisos diarios y recetas por NP.');
 await db.close();
