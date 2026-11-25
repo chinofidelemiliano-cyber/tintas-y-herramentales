@@ -187,5 +187,73 @@ await db.exec('reset role');
 const closed=(await db.query('select status,specifications from public.prisma_orders where id=$1',[captured.id])).rows[0];
 assert.equal(closed.status,'confirmed');
 assert.equal(closed.specifications.actual_cut_meters,75);
-console.log('Validado: cronómetro, auditoría, clasificación, autorización de suaje, reservas, permisos delegados y cierre sin tinta.');
+for(const file of ['plant-controls.sql','plant-alerts.sql']){
+ const sql=readFileSync(new URL('../supabase/'+file,import.meta.url),'utf8');
+ await db.exec(sql);
+ await db.exec(sql);
+}
+const seedPath=process.env.PRISMA_PLANT_SEED;
+const testCatalog=`insert into public.prisma_plant_catalog(kind,code,details) values
+ ('anilox','AX1','{"lpi":225,"bcm":6.7}'),
+ ('part','NP001-1','{"names":["Producto de prueba"]}'),
+ ('part','NP136-1','{"names":["Variante de prueba A","Variante de prueba B"]}')
+ on conflict(kind,code) do nothing;`;
+await db.exec(seedPath?readFileSync(seedPath,'utf8'):testCatalog);
+await user(a);
+const plant=(operation,extra={})=>rpc('plant_controls',{operation,...extra});
+const catalog=await plant('tools');
+assert.equal(catalog.anilox.length,seedPath?41:1);
+assert.ok(catalog.dies.length>10);
+const parts=(await plant('parts')).parts;
+assert.equal(parts.length,seedPath?408:2);
+assert.equal(parts.find(part=>part.code==='NP136-1').names.length,2);
+const inkPlan=(await plant('ink_list')).inks[0];
+await plant('ink_settings',{id:inkPlan.id,category:'A',indispensable:true,lead_days:7,review_days:14,safety_days:3});
+await plant('ink_ordered',{id:inkPlan.id,ordered:true});
+await plant('ink_measure',{id:inkPlan.id,ph:8.1,viscosity:'22',viscosity_unit:'s · Copa Zahn 2',drying:'Correcto'});
+assert.equal((await plant('ink_history',{id:inkPlan.id})).parameters.length,1);
+const die=catalog.dies[0];
+await plant('save_catalog',{kind:'die',code:die.code,details:{initial_regrinds:4,serial:'VALIDACIÓN'}});
+const batch=await plant('service_batch',{kind:'die',service:'resharpen',due_on:catalog.today,codes:[die.code],deliverer:'Entrega',recipient:'Recibe'});
+assert.equal(batch.services.length,1);
+await assert.rejects(plant('service_batch',{kind:'die',service:'resharpen',due_on:catalog.today,codes:[die.code],deliverer:'Entrega',recipient:'Recibe'}));
+await plant('complete_service',{id:batch.services[0].id,received_on:catalog.today,passes:'yes',gear:'yes',material:'Papel',received_by:'Recepción'});
+assert.equal((await plant('tools')).dies.find(item=>item.code===die.code).regrinds,5);
+await plant('save_catalog',{kind:'recipe',code:'NP001-1',details:{stations:[{slot:1,color:'Azul',anilox:'AX1'}]}});
+assert.equal((await plant('recipe',{code:'NP001-1'})).recipe.stations[0].anilox,'AX1');
+const [variant,otherVariant]=parts.find(part=>part.code==='NP136-1').names;
+await plant('save_catalog',{kind:'recipe',code:'NP136-1',product:variant,details:{stations:[{slot:1,color:'Verde'}]}});
+assert.equal((await plant('recipe',{code:'NP136-1',product:variant})).recipe.stations[0].color,'Verde');
+assert.equal((await plant('recipe',{code:'NP136-1',product:otherVariant})).recipe,null);
+await assert.rejects(plant('recipe',{code:'NP136-1'}),/productos distintos/);
+await db.exec('reset role');
+assert.equal((await db.query('select public.prisma_queue_plant_alerts() as queued')).rows[0].queued,0);
+await db.exec(`create schema net;
+ create function net.http_post(url text,headers jsonb,body jsonb,timeout_milliseconds integer) returns bigint language sql as $$select 1::bigint$$;
+ insert into public.prisma_notification_config(id,public_key,private_key,subject,dispatch_secret,edge_url)
+ values(1,'test','test','test','test','https://example.test');`);
+await db.query(`insert into public.prisma_notification_devices(user_id,device_key,label,origin,endpoint,p256dh,auth_key)
+ values($1,gen_random_uuid(),'browser','https://example.test','https://example.test/push','test','test')`,[a]);
+assert.ok((await db.query('select public.prisma_queue_plant_alerts() as queued')).rows[0].queued>=1);
+assert.equal((await db.query('select public.prisma_queue_plant_alerts() as queued')).rows[0].queued,0);
+await db.exec('set role service_role');
+const push=(await db.query('select public.prisma_claim_push_jobs() as jobs')).rows[0].jobs;
+assert.ok(push.some(job=>job.payload.url==='/#herramental'));
+await db.exec('reset role');
+await db.exec('set role anon');
+assert.equal((await portal({operation:'catalog'})).parts.length,seedPath?408:2);
+const linked=await portal({operation:'submit',request_key:'00000000-0000-4000-8000-000000000003',order:{
+ ...shared,folio:'TYPE-LINKED',np:'NP001-1',product:'Producto de prueba',
+ production_type:'print',die_id:null,plates:'PLC-2',ink_selections:[{slot:1,product_id:inkLot.product_id}]
+}});
+assert.equal(linked.recipe_ready,true);
+await db.exec('reset role');
+await db.query("update public.prisma_orders set status='confirmed' where id=$1",[linked.id]);
+await db.query("insert into public.prisma_items(order_id,lot_id,np,grams,cost_kg,meters) values($1,$2,'NP001-1',100,0,500),($1,$2,'NP001-1',150,0,500)",[linked.id,inkLot.id]);
+await user(a);
+assert.equal((await plant('forecast',{code:'NP001-1',meters:1000})).estimates[0].estimated_grams,500);
+assert.equal((await plant('recipe',{order_id:linked.id})).recipe.stations[0].anilox,'AX1');
+await db.exec('reset role;set role anon');
+await assert.rejects(plant('tools'),/permission denied/);
+console.log('Validado: preparación, clasificación, reservas, maestros de planta, reafile, avisos diarios y recetas por NP.');
 await db.close();

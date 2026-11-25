@@ -41,6 +41,22 @@ async function initialize(){
  if(!/^op_[a-f0-9]{64}$/.test(accessKey))throw Error('Abre el enlace completo de captura que te compartió el administrador.');
  await refresh();const catalog=await api({operation:'catalog'});if(catalog.capture_version!==2)throw Error('Falta activar la captura completa. Ejecuta el archivo activar-produccion.sql completo desde la ayuda de configuración.');if(catalog.production_workflow_version!==4)throw Error('Falta activar los perfiles del personal: el administrador debe ejecutar supabase/operator-profiles.sql en Supabase y recargar esta página.');picker=mountInkPicker($('#ink-picker'),$('#order-form').elements.machine,catalog.products,catalog.ink_options||[]);renderToolCatalog(catalog);$('#workspace').hidden=false;
  const form=$('#order-form');
+ if(catalog.parts?.length){
+  const listing=document.createElement('datalist');
+  listing.id='plant-parts';
+  for(const part of catalog.parts){
+   const option=document.createElement('option');
+   option.value=part.code;
+   option.label=part.names.join(' / ');
+   listing.append(option);
+  }
+  form.append(listing);
+  form.elements.np.setAttribute('list',listing.id);
+  form.elements.np.addEventListener('change',()=>{
+   const part=catalog.parts.find(item=>item.code===form.elements.np.value.trim().toUpperCase());
+   if(part?.names.length===1&&!form.elements.product.value)form.elements.product.value=part.names[0];
+  });
+ }
  const classified=catalog.production_types_version===1;
  const type=form.elements.production_type,white=form.elements.white_process,plates=form.elements.plates;
  $('#production-type-fields').hidden=!classified;
@@ -78,7 +94,7 @@ async function initialize(){
   }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;return;}
   if(!pending||JSON.stringify(pending.order)!==JSON.stringify(order))pending={request_key:crypto.randomUUID(),order};saveDraft();$('#order-fields').disabled=true;
   try{const result=await api({operation:'submit',...pending});pending=null;const keep={pressman:order.pressman,machine:order.machine,scheduled_date:order.scheduled_date};form.reset();for(const [key,value]of Object.entries(keep))form.elements.namedItem(key).value=value;picker.reset();renderAssigned([]);showPriority();updateType();try{sessionStorage.removeItem(storageKey);}catch{}
-   $('#form-success').textContent=`Orden ${order.folio} registrada en la secuencia #${String(result.queue_number).padStart(3,'0')}. Ya está disponible en planta.`+(result.die_compatibility==='incompatible'?' ADVERTENCIA: SUAJE NO COMPATIBLE CON EL MATERIAL. La preparación requiere autorización técnica.':result.die_compatibility==='unverified'?' Compatibilidad no verificada.':'');$('#form-success').hidden=false;
+   $('#form-success').textContent=`Orden ${order.folio} registrada en la secuencia #${String(result.queue_number).padStart(3,'0')}. Ya está disponible en planta.`+(result.recipe_ready?' Receta por NP vinculada.':'')+(result.die_compatibility==='incompatible'?' ADVERTENCIA: SUAJE NO COMPATIBLE CON EL MATERIAL. La preparación requiere autorización técnica.':result.die_compatibility==='unverified'?' Compatibilidad no verificada.':'');$('#form-success').hidden=false;
    await refresh().catch(()=>{});
   }catch(error){$('#form-error').textContent=error.message;$('#form-error').hidden=false;}finally{$('#order-fields').disabled=false;}
  };
